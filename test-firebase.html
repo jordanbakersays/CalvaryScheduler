@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Test Firebase Only</title>
+</head>
+<body>
+<h1 id="status">Loading Firebase...</h1>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+  document.getElementById("status").textContent =
+    "Firebase scripts loaded OK. typeof firebase = " + typeof firebase;
+</script>
+</body>
+</html>
