@@ -21,6 +21,9 @@
     --bad: #e2645a;
   }
   * { box-sizing: border-box; }
+  html, body {
+    overflow-x: hidden;
+  }
   body {
     margin: 0;
     background: var(--bg);
@@ -385,7 +388,7 @@ function App() {
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <Header tab={tab} setTab={setTab} isAdmin={isAdmin} ministryLabel={ministryLabel} />
-      <main style={{ flex: 1, maxWidth: 880, margin: "0 auto", width: "100%", paddingTop: 20, paddingLeft: 26, paddingRight: 34, paddingBottom: 60, boxSizing: "border-box" }}>
+      <main style={{ flex: 1, maxWidth: 880, margin: "0 auto", width: "100%", padding: "20px 26px 60px", boxSizing: "border-box" }}>
         {tab === "schedule" && <ScheduleView slots={slots} isAdmin={isAdmin} />}
         {tab === "manage" && (isAdmin
           ? <ManageView volunteers={volunteers} slots={slots} showToast={showToast} volunteersCollectionName={volunteersCollectionName} slotsCollectionName={slotsCollectionName} />
@@ -419,7 +422,7 @@ function Header({ tab, setTab, isAdmin, ministryLabel }) {
   ];
   return (
     <header style={{ borderBottom: "1px solid var(--border)", position: "sticky", top: 0, background: "var(--bg)", zIndex: 10 }}>
-      <div style={{ maxWidth: 880, margin: "0 auto", paddingTop: 16, paddingLeft: 26, paddingRight: 34, boxSizing: "border-box" }}>
+      <div style={{ maxWidth: 880, margin: "0 auto", padding: "16px 26px 0", boxSizing: "border-box" }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 14 }}>
           <div>
             <div style={{ fontSize: 15, letterSpacing: "0.08em", color: "var(--accent)", fontWeight: 700, textTransform: "uppercase" }}>{ministryLabel}</div>
@@ -547,6 +550,31 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
   async function removeVolunteer(id) {
     await deleteDoc(doc(db, volunteersCollectionName, id));
     showToast("Volunteer removed");
+  }
+
+  const [editingVolId, setEditingVolId] = useState(null);
+  const [evName, setEvName] = useState("");
+  const [evPhone, setEvPhone] = useState("");
+  const [evEmail, setEvEmail] = useState("");
+
+  function startEditVolunteer(v) {
+    setEditingVolId(v.id);
+    setEvName(v.name || "");
+    setEvPhone(v.phone || "");
+    setEvEmail(v.email || "");
+  }
+
+  function cancelEditVolunteer() {
+    setEditingVolId(null);
+  }
+
+  async function saveVolunteerEdit() {
+    if (!evName.trim()) return;
+    await updateDoc(doc(db, volunteersCollectionName, editingVolId), {
+      name: evName.trim(), phone: evPhone.trim(), email: evEmail.trim(),
+    });
+    setEditingVolId(null);
+    showToast("Volunteer updated");
   }
 
   async function addSlot() {
@@ -680,13 +708,32 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
             <Button variant="accent" onClick={addVolunteer}>Add volunteer</Button>
           </div>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {volunteers.map(v => (
-            <div key={v.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 12px", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8 }}>
-              <div style={{ fontWeight: 600, fontSize: 17, minWidth: 140 }}>{v.name}</div>
-              <div className="mono" style={{ fontSize: 15, color: "var(--muted)" }}>{v.phone}</div>
-              <div style={{ fontSize: 15, color: "var(--muted)" }}>{v.email}</div>
-              <Button variant="ghost" onClick={() => removeVolunteer(v.id)} style={{ marginLeft: "auto" }}>Remove</Button>
+            <div key={v.id} style={{ padding: "12px 14px", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 10 }}>
+              {editingVolId === v.id ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <Field label="Name"><input style={inputStyle} value={evName} onChange={e => setEvName(e.target.value)} /></Field>
+                  <Field label="Phone"><input style={inputStyle} value={evPhone} onChange={e => setEvPhone(e.target.value)} placeholder="313-555-0100" /></Field>
+                  <Field label="Email"><input style={inputStyle} value={evEmail} onChange={e => setEvEmail(e.target.value)} /></Field>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Button variant="accent" onClick={saveVolunteerEdit}>Save</Button>
+                    <Button variant="ghost" onClick={cancelEditVolunteer}>Cancel</Button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ fontWeight: 600, fontSize: 17 }}>{v.name}</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 10px", fontSize: 15, color: "var(--muted)" }}>
+                    {v.phone && <span className="mono">{v.phone}</span>}
+                    {v.email && <span style={{ overflowWrap: "anywhere" }}>{v.email}</span>}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                    <Button onClick={() => startEditVolunteer(v)}>Edit</Button>
+                    <Button variant="danger" onClick={() => removeVolunteer(v.id)}>Remove</Button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
