@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=Quicksand:wght@500;600;700&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
+    color-scheme: dark;
     --bg: #1c1d21;
     --panel: #24262b;
     --panel-2: #2c2e34;
@@ -23,6 +24,10 @@
   * { box-sizing: border-box; }
   html, body {
     overflow-x: hidden;
+  }
+  html {
+    overflow-y: scroll;
+    scrollbar-gutter: stable;
   }
   body {
     margin: 0;
@@ -407,13 +412,20 @@ function App() {
     }
   }
 
+  function logout() {
+    sessionStorage.removeItem("vs_admin");
+    setIsAdmin(false);
+    if (tab !== "schedule") setTab("schedule");
+    showToast("Logged out");
+  }
+
   if (!fbReady) {
     return <Centered>Loading…</Centered>;
   }
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <Header tab={tab} setTab={setTab} isAdmin={isAdmin} ministryLabel={ministryLabel} />
+      <Header tab={tab} setTab={setTab} isAdmin={isAdmin} ministryLabel={ministryLabel} onLogout={logout} />
       <main style={{ flex: 1, maxWidth: 880, margin: "0 auto", width: "100%", padding: "20px 26px 60px", boxSizing: "border-box" }}>
         {tab === "schedule" && <ScheduleView slots={slots} isAdmin={isAdmin} />}
         {tab === "manage" && (isAdmin
@@ -440,7 +452,7 @@ function Centered({ children }) {
   return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}>{children}</div>;
 }
 
-function Header({ tab, setTab, isAdmin, ministryLabel }) {
+function Header({ tab, setTab, isAdmin, ministryLabel, onLogout }) {
   const tabs = [
     { id: "schedule", label: "Schedule" },
     { id: "manage", label: "Manage" },
@@ -450,10 +462,15 @@ function Header({ tab, setTab, isAdmin, ministryLabel }) {
     <header style={{ borderBottom: "1px solid var(--border)", position: "sticky", top: 0, background: "var(--bg)", zIndex: 10 }}>
       <div style={{ maxWidth: 880, margin: "0 auto", padding: "16px 26px 0", boxSizing: "border-box", position: "relative" }}>
         {isAdmin && (
-          <span className="mono" style={{
-            position: "absolute", top: 16, right: 26,
-            fontSize: 14, color: "var(--good)", border: "1px solid var(--good)55", padding: "3px 8px", borderRadius: 20,
-          }}>admin</span>
+          <button
+            onClick={onLogout}
+            className="mono"
+            style={{
+              position: "absolute", top: 16, right: 26,
+              fontSize: 14, color: "var(--good)", border: "1px solid var(--good)55", padding: "3px 8px", borderRadius: 20,
+              background: "transparent", cursor: "pointer", touchAction: "manipulation", WebkitTapHighlightColor: "transparent",
+            }}
+          >admin · log out</button>
         )}
         <div style={{ textAlign: "center", marginBottom: 14 }}>
           <div style={{ fontSize: 15, letterSpacing: "0.08em", color: "var(--accent)", fontWeight: 700, textTransform: "uppercase" }}>{ministryLabel}</div>
@@ -751,7 +768,7 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
                       onClick={() => toggleSelectedVol(v.id)}
                       style={{
                         display: "flex", alignItems: "center", gap: 10, fontSize: 16,
-                        padding: "10px 6px", borderRadius: 6, cursor: "pointer",
+                        padding: "10px 6px", borderRadius: 6, cursor: "pointer", color: "var(--text)",
                         touchAction: "manipulation", WebkitTapHighlightColor: "transparent", userSelect: "none",
                       }}
                     >
