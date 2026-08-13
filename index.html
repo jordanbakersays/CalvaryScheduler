@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Volunteer Schedule</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #1c1d21;
+    --panel: #24262b;
+    --panel-2: #2c2e34;
+    --border: #35373e;
+    --accent: #e8a33d;
+    --accent-dim: #e8a33d33;
+    --text: #f5f3ee;
+    --muted: #9b9ca3;
+    --good: #6fbf73;
+    --bad: #e2645a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+  button {
+    font-family: inherit;
+    cursor: pointer;
+  }
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- Firebase (modular SDK) -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import {
+    getFirestore, collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc,
+    onSnapshot, setDoc, query, orderBy
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  // ------------------------------------------------------------------
+  // FIREBASE CONFIG — replace with your own project's config values.
+  // See README.md "Step 1" for where to get these.
+  // ------------------------------------------------------------------
+  const firebaseConfig = {
+    apiKey: "AIzaSyAS8yCrCtKSltUCvPViZJrScUBy8dkiPMU",
+    authDomain: "schedulercs.firebaseapp.com",
+    projectId: "schedulercs",
+    storageBucket: "schedulercs.firebasestorage.app",
+    messagingSenderId: "733761692220",
+    appId: "1:733761692220:web:2d87567543e20cf39e5939"
+  };
+
+  const fbApp = initializeApp(firebaseConfig);
+  const db = getFirestore(fbApp);
+
+  // Expose a small bridge so the React app (loaded as a classic script
+  // below) can use Firestore without everything living in a module.
+  window.__fb = {
+    db, collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc,
+    onSnapshot, setDoc, query, orderBy
+  };
+  window.dispatchEvent(new Event("fb-ready"));
+</script>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useCallback } = React;
+
+// ---------- ministry (multi-instance) config ----------
+// Add an entry here for each group using this app. The `key` is what goes
+// in the URL as ?org=key — e.g. yoursite.pages.dev/?org=kids
+// Each key gets its own volunteers, shifts, and admin passcode, all inside
+// the same Firebase project — nothing else to duplicate or maintain twice.
+const MINISTRIES = {
+  students: { label: "Calvary Students" },
+  kids: { label: "Children's Ministry" },
+};
+const DEFAULT_MINISTRY = "students";
+
+function getMinistryKey() {
+  const params = new URLSearchParams(window.location.search);
+  const key = params.get("org");
+  return (key && MINISTRIES[key]) ? key : DEFAULT_MINISTRY;
+}
+function getMinistryLabel(key) {
+  return MINISTRIES[key]?.label || key;
+}
+
+// ---------- helpers ----------
+function fmtDate(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function addDaysISO(iso, days) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + days);
+  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+}
+function buildReminderMessage(r) {
+  const roleText = r.role ? ` (${r.role})` : "";
+  return `Hi ${r.volunteerName.split(" ")[0]}! Reminder: you're signed up to volunteer on ${fmtDate(r.date)} at ${r.time}${roleText}. Thanks for serving with Calvary Students!`;
+}
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// ---------- small UI atoms ----------
+function Button({ children, onClick, variant = "default", disabled, style }) {
+  const base = {
+    padding: "8px 14px",
+    borderRadius: 8,
+    fontSize: 14,
+    fontWeight: 600,
+    border: "1px solid var(--border)",
+    background: "var(--panel-2)",
+    color: "var(--text)",
+    transition: "background 120ms, border-color 120ms",
+  };
+  const variants = {
+    default: {},
+    accent: { background: "var(--accent)", borderColor: "var(--accent)", color: "#1c1d21" },
+    ghost: { background: "transparent" },
+    danger: { color: "var(--bad)", borderColor: "var(--bad)55" },
+  };
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{ ...base, ...variants[variant], opacity: disabled ? 0.5 : 1, cursor: disabled ? "not-allowed" : "pointer", ...style }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13, color: "var(--muted)" }}>
+      {label}
+      {children}
+    </label>
+  );
+}
+
+const inputStyle = {
+  background: "var(--panel)",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  padding: "9px 10px",
+  color: "var(--text)",
+  fontSize: 14,
+  fontFamily: "inherit",
+};
+
+// ---------- App ----------
+function App() {
+  const ministryKey = useMemo(() => getMinistryKey(), []);
+  const ministryLabel = getMinistryLabel(ministryKey);
+  const volunteersCollectionName = `volunteers_${ministryKey}`;
+  const slotsCollectionName = `slots_${ministryKey}`;
+  const adminDocId = `admin_${ministryKey}`;
+
+  const [fbReady, setFbReady] = useState(!!window.__fb);
+  const [tab, setTab] = useState("schedule");
+  const [isAdmin, setIsAdmin] = useState(sessionStorage.getItem("vs_admin") === "1");
+  const [volunteers, setVolunteers] = useState([]);
+  const [slots, setSlots] = useState([]);
+  const [passcode, setPasscode] = useState(null); // stored admin passcode from config doc
+  const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    if (fbReady) return;
+    const onReady = () => setFbReady(true);
+    window.addEventListener("fb-ready", onReady);
+    return () => window.removeEventListener("fb-ready", onReady);
+  }, [fbReady]);
+
+  useEffect(() => {
+    if (!fbReady) return;
+    const { db, collection, onSnapshot, query, orderBy, doc, getDoc } = window.__fb;
+
+    const unsubVol = onSnapshot(collection(db, volunteersCollectionName), snap => {
+      setVolunteers(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.name.localeCompare(b.name)));
+    });
+    const unsubSlots = onSnapshot(query(collection(db, slotsCollectionName), orderBy("date")), snap => {
+      setSlots(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    getDoc(doc(db, "config", adminDocId)).then(snap => {
+      if (snap.exists()) setPasscode(snap.data().passcode);
+      else setPasscode(null);
+    });
+    return () => { unsubVol(); unsubSlots(); };
+  }, [fbReady, volunteersCollectionName, slotsCollectionName, adminDocId]);
+
+  function showToast(msg, kind = "good") {
+    setToast({ msg, kind });
+    setTimeout(() => setToast(null), 2800);
+  }
+
+  function tryUnlock(code) {
+    if (passcode && code === passcode) {
+      sessionStorage.setItem("vs_admin", "1");
+      setIsAdmin(true);
+      showToast("Admin unlocked");
+    } else if (!passcode && code) {
+      // first-run: no passcode set yet, whatever they type becomes it
+      window.__fb.setDoc(window.__fb.doc(window.__fb.db, "config", adminDocId), { passcode: code });
+      setPasscode(code);
+      sessionStorage.setItem("vs_admin", "1");
+      setIsAdmin(true);
+      showToast("Admin passcode set — remember it!");
+    } else {
+      showToast("Wrong passcode", "bad");
+    }
+  }
+
+  if (!fbReady) {
+    return <Centered>Loading…</Centered>;
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      <Header tab={tab} setTab={setTab} isAdmin={isAdmin} ministryLabel={ministryLabel} />
+      <main style={{ flex: 1, maxWidth: 880, margin: "0 auto", width: "100%", padding: "20px 16px 60px" }}>
+        {tab === "schedule" && <ScheduleView slots={slots} isAdmin={isAdmin} />}
+        {tab === "manage" && (isAdmin
+          ? <ManageView volunteers={volunteers} slots={slots} showToast={showToast} volunteersCollectionName={volunteersCollectionName} slotsCollectionName={slotsCollectionName} />
+          : <AdminGate onSubmit={tryUnlock} firstRun={passcode === null} />)}
+        {tab === "reminders" && (isAdmin
+          ? <RemindersView volunteers={volunteers} slots={slots} showToast={showToast} slotsCollectionName={slotsCollectionName} ministryKey={ministryKey} />
+          : <AdminGate onSubmit={tryUnlock} firstRun={passcode === null} />)}
+      </main>
+      {toast && (
+        <div style={{
+          position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)",
+          background: "var(--panel-2)", border: `1px solid ${toast.kind === "bad" ? "var(--bad)" : "var(--good)"}`,
+          color: "var(--text)", padding: "10px 18px", borderRadius: 10, fontSize: 14, zIndex: 50,
+        }}>
+          {toast.msg}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Centered({ children }) {
+  return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}>{children}</div>;
+}
+
+function Header({ tab, setTab, isAdmin, ministryLabel }) {
+  const tabs = [
+    { id: "schedule", label: "Schedule" },
+    { id: "manage", label: "Manage" },
+    { id: "reminders", label: "Reminders" },
+  ];
+  return (
+    <header style={{ borderBottom: "1px solid var(--border)", position: "sticky", top: 0, background: "var(--bg)", zIndex: 10 }}>
+      <div style={{ maxWidth: 880, margin: "0 auto", padding: "16px 16px 0" }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 14 }}>
+          <div>
+            <div style={{ fontSize: 12, letterSpacing: "0.08em", color: "var(--accent)", fontWeight: 700, textTransform: "uppercase" }}>{ministryLabel}</div>
+            <h1 style={{ margin: "2px 0 0", fontSize: 22, fontWeight: 700 }}>Volunteer Schedule</h1>
+          </div>
+          {isAdmin && <span className="mono" style={{ fontSize: 11, color: "var(--good)", border: "1px solid var(--good)55", padding: "3px 8px", borderRadius: 20 }}>admin</span>}
+        </div>
+        <nav style={{ display: "flex", gap: 4 }}>
+          {tabs.map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)} style={{
+              background: "transparent", border: "none", color: tab === t.id ? "var(--text)" : "var(--muted)",
+              padding: "10px 4px", marginRight: 20, fontSize: 14, fontWeight: 600,
+              borderBottom: tab === t.id ? "2px solid var(--accent)" : "2px solid transparent",
+            }}>
+              {t.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+    </header>
+  );
+}
+
+function AdminGate({ onSubmit, firstRun }) {
+  const [code, setCode] = useState("");
+  return (
+    <div style={{ maxWidth: 320, margin: "60px auto", display: "flex", flexDirection: "column", gap: 12, textAlign: "center" }}>
+      <div style={{ fontSize: 14, color: "var(--muted)" }}>
+        {firstRun ? "Set an admin passcode for this schedule." : "Enter the admin passcode to manage the schedule."}
+      </div>
+      <input
+        style={inputStyle}
+        type="password"
+        value={code}
+        onChange={e => setCode(e.target.value)}
+        onKeyDown={e => e.key === "Enter" && onSubmit(code)}
+        placeholder="Passcode"
+        autoFocus
+      />
+      <Button variant="accent" onClick={() => onSubmit(code)}>{firstRun ? "Set passcode" : "Unlock"}</Button>
+    </div>
+  );
+}
+
+// ---------- Schedule (public) ----------
+function ScheduleView({ slots }) {
+  const grouped = useMemo(() => {
+    const map = {};
+    for (const s of slots) {
+      if (!map[s.date]) map[s.date] = [];
+      map[s.date].push(s);
+    }
+    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b));
+  }, [slots]);
+
+  if (grouped.length === 0) {
+    return <Empty text="No shifts scheduled yet." />;
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {grouped.map(([date, items]) => (
+        <div key={date} style={{ display: "flex", gap: 14 }}>
+          <div style={{ width: 3, background: "var(--border)", borderRadius: 2 }} />
+          <div style={{ flex: 1 }}>
+            <div className="mono" style={{ fontSize: 13, color: "var(--accent)", fontWeight: 600, marginBottom: 8 }}>{fmtDate(date)}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {items.sort((a,b) => a.time.localeCompare(b.time)).map(s => (
+                <div key={s.id} style={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 15 }}>{s.volunteerName || <span style={{ color: "var(--muted)" }}>Open</span>}</div>
+                    {s.role && <div style={{ fontSize: 13, color: "var(--muted)" }}>{s.role}</div>}
+                  </div>
+                  <div className="mono" style={{ fontSize: 14, color: "var(--muted)" }}>{s.time}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Empty({ text }) {
+  return <div style={{ textAlign: "center", color: "var(--muted)", padding: "60px 0", fontSize: 14 }}>{text}</div>;
+}
+
+// ---------- Manage (admin) ----------
+function ManageView({ volunteers, slots, showToast, volunteersCollectionName, slotsCollectionName }) {
+  const { db, collection, addDoc, updateDoc, deleteDoc, doc } = window.__fb;
+  const [vName, setVName] = useState("");
+  const [vPhone, setVPhone] = useState("");
+  const [vEmail, setVEmail] = useState("");
+
+  const [sDate, setSDate] = useState(todayISO());
+  const [sTime, setSTime] = useState("09:00");
+  const [sRole, setSRole] = useState("");
+  const [sVolunteer, setSVolunteer] = useState("");
+
+  async function addVolunteer() {
+    if (!vName.trim()) return;
+    await addDoc(collection(db, volunteersCollectionName), { name: vName.trim(), phone: vPhone.trim(), email: vEmail.trim() });
+    setVName(""); setVPhone(""); setVEmail("");
+    showToast("Volunteer added");
+  }
+
+  async function removeVolunteer(id) {
+    await deleteDoc(doc(db, volunteersCollectionName, id));
+    showToast("Volunteer removed");
+  }
+
+  async function addSlot() {
+    if (!sDate || !sTime) return;
+    const vol = volunteers.find(v => v.id === sVolunteer);
+    await addDoc(collection(db, slotsCollectionName), {
+      date: sDate, time: sTime, role: sRole.trim(),
+      volunteerId: vol ? vol.id : null, volunteerName: vol ? vol.name : null,
+      reminderSentAt: null,
+    });
+    setSRole(""); setSVolunteer("");
+    showToast("Shift added");
+  }
+
+  async function updateSlotVolunteer(slotId, volunteerId) {
+    const vol = volunteers.find(v => v.id === volunteerId);
+    await updateDoc(doc(db, slotsCollectionName, slotId), { volunteerId: vol ? vol.id : null, volunteerName: vol ? vol.name : null });
+  }
+
+  async function removeSlot(id) {
+    await deleteDoc(doc(db, slotsCollectionName, id));
+    showToast("Shift removed");
+  }
+
+  const sortedSlots = [...slots].sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time));
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+      <section>
+        <SectionTitle>Add a shift</SectionTitle>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 12, padding: 16 }}>
+          <Field label="Date"><input style={inputStyle} type="date" value={sDate} onChange={e => setSDate(e.target.value)} /></Field>
+          <Field label="Time"><input style={inputStyle} type="time" value={sTime} onChange={e => setSTime(e.target.value)} /></Field>
+          <Field label="Role / notes (optional)"><input style={inputStyle} value={sRole} onChange={e => setSRole(e.target.value)} placeholder="e.g. Check-in table" /></Field>
+          <Field label="Assign volunteer">
+            <select style={inputStyle} value={sVolunteer} onChange={e => setSVolunteer(e.target.value)}>
+              <option value="">— Open (unassigned) —</option>
+              {volunteers.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </select>
+          </Field>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <Button variant="accent" onClick={addSlot}>Add shift</Button>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <SectionTitle>All shifts</SectionTitle>
+        {sortedSlots.length === 0 && <Empty text="No shifts yet." />}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {sortedSlots.map(s => (
+            <div key={s.id} style={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 10, padding: 12, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+              <div className="mono" style={{ fontSize: 13, color: "var(--accent)", minWidth: 150 }}>{fmtDate(s.date)} · {s.time}</div>
+              {s.role && <div style={{ fontSize: 13, color: "var(--muted)" }}>{s.role}</div>}
+              <select style={{ ...inputStyle, marginLeft: "auto" }} value={s.volunteerId || ""} onChange={e => updateSlotVolunteer(s.id, e.target.value)}>
+                <option value="">— Open —</option>
+                {volunteers.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </select>
+              <Button variant="danger" onClick={() => removeSlot(s.id)}>Remove</Button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <SectionTitle>Volunteers</SectionTitle>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 12, padding: 16, marginBottom: 12 }}>
+          <Field label="Name"><input style={inputStyle} value={vName} onChange={e => setVName(e.target.value)} /></Field>
+          <Field label="Phone"><input style={inputStyle} value={vPhone} onChange={e => setVPhone(e.target.value)} placeholder="313-555-0100" /></Field>
+          <Field label="Email"><input style={inputStyle} value={vEmail} onChange={e => setVEmail(e.target.value)} /></Field>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <Button variant="accent" onClick={addVolunteer}>Add volunteer</Button>
+          </div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {volunteers.map(v => (
+            <div key={v.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 12px", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8 }}>
+              <div style={{ fontWeight: 600, fontSize: 14, minWidth: 140 }}>{v.name}</div>
+              <div className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>{v.phone}</div>
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>{v.email}</div>
+              <Button variant="ghost" onClick={() => removeVolunteer(v.id)} style={{ marginLeft: "auto" }}>Remove</Button>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SectionTitle({ children }) {
+  return <div style={{ fontSize: 13, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>{children}</div>;
+}
+
+// ---------- Reminders (admin) ----------
+function RemindersView({ volunteers, slots, showToast, slotsCollectionName, ministryKey }) {
+  const { db, doc, updateDoc } = window.__fb;
+  const [windowDays, setWindowDays] = useState(3);
+  const [sending, setSending] = useState(false);
+  const [emailStatus, setEmailStatus] = useState({}); // slotId -> "sent" | "error"
+
+  const upcoming = useMemo(() => {
+    const today = todayISO();
+    const cutoff = addDaysISO(today, windowDays);
+    return slots
+      .filter(s => s.volunteerId && s.date >= today && s.date <= cutoff)
+      .map(s => {
+        const vol = volunteers.find(v => v.id === s.volunteerId);
+        return { ...s, phone: vol?.phone, email: vol?.email };
+      })
+      .sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time));
+  }, [slots, volunteers, windowDays]);
+
+  const withPhones = upcoming.filter(s => s.phone);
+
+  async function copyAllNumbers() {
+    const nums = withPhones.map(s => s.phone).join(", ");
+    const ok = await copyToClipboard(nums);
+    showToast(ok ? `Copied ${withPhones.length} number(s)` : "Couldn't copy — select manually", ok ? "good" : "bad");
+  }
+
+  async function copyOne(text, label) {
+    const ok = await copyToClipboard(text);
+    showToast(ok ? `${label} copied` : "Couldn't copy", ok ? "good" : "bad");
+  }
+
+  async function sendEmails() {
+    const toSend = upcoming.filter(s => s.email && !s.reminderSentAt);
+    if (toSend.length === 0) {
+      showToast("No emails to send", "bad");
+      return;
+    }
+    setSending(true);
+    try {
+      const res = await fetch("/send-reminders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ministryKey,
+          reminders: toSend.map(s => ({
+            slotId: s.id, email: s.email, volunteerName: s.volunteerName,
+            date: s.date, time: s.time, role: s.role,
+          })),
+        }),
+      });
+      const data = await res.json();
+      const nextStatus = {};
+      for (const r of data.results || []) {
+        nextStatus[r.slotId] = r.ok ? "sent" : "error";
+        if (r.ok) {
+          await updateDoc(doc(db, slotsCollectionName, r.slotId), { reminderSentAt: new Date().toISOString() });
+        }
+      }
+      setEmailStatus(prev => ({ ...prev, ...nextStatus }));
+      const sentCount = Object.values(nextStatus).filter(v => v === "sent").length;
+      showToast(`Sent ${sentCount}/${toSend.length} email(s)`, sentCount === toSend.length ? "good" : "bad");
+    } catch (e) {
+      showToast("Send failed — check the function is deployed", "bad");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const pendingEmailCount = upcoming.filter(s => s.email && !s.reminderSentAt).length;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <Field label="Show shifts in the next">
+          <select style={inputStyle} value={windowDays} onChange={e => setWindowDays(Number(e.target.value))}>
+            {[1,2,3,5,7,14].map(n => <option key={n} value={n}>{n} day{n>1?"s":""}</option>)}
+          </select>
+        </Field>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <Button onClick={copyAllNumbers} disabled={withPhones.length === 0}>Copy all numbers</Button>
+          <Button variant="accent" onClick={sendEmails} disabled={sending || pendingEmailCount === 0}>
+            {sending ? "Sending…" : `Send ${pendingEmailCount || ""} email${pendingEmailCount === 1 ? "" : "s"}`}
+          </Button>
+        </div>
+      </div>
+
+      {upcoming.length === 0 && <Empty text="No assigned shifts in this window." />}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {upcoming.map(s => {
+          const status = s.reminderSentAt ? "sent" : emailStatus[s.id];
+          return (
+            <div key={s.id} style={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 10, padding: 14, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+              <div style={{ minWidth: 160 }}>
+                <div style={{ fontWeight: 600, fontSize: 15 }}>{s.volunteerName}</div>
+                <div className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>{fmtDate(s.date)} · {s.time}</div>
+              </div>
+              <div style={{ fontSize: 12, color: "var(--muted)", flex: 1, minWidth: 120 }}>
+                {s.phone || <span style={{ color: "var(--bad)" }}>no phone</span>}
+                {s.email ? ` · ${s.email}` : <span style={{ color: "var(--bad)" }}> · no email</span>}
+              </div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <Button onClick={() => copyOne(s.phone, "Number")} disabled={!s.phone}>Copy #</Button>
+                <Button onClick={() => copyOne(buildReminderMessage(s), "Message")}>Copy msg</Button>
+                {status === "sent" && <span style={{ fontSize: 12, color: "var(--good)" }}>✓ emailed</span>}
+                {status === "error" && <span style={{ fontSize: 12, color: "var(--bad)" }}>✗ failed</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
