@@ -448,19 +448,22 @@ function Header({ tab, setTab, isAdmin, ministryLabel }) {
   ];
   return (
     <header style={{ borderBottom: "1px solid var(--border)", position: "sticky", top: 0, background: "var(--bg)", zIndex: 10 }}>
-      <div style={{ maxWidth: 880, margin: "0 auto", padding: "16px 26px 0", boxSizing: "border-box" }}>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 14 }}>
-          <div>
-            <div style={{ fontSize: 15, letterSpacing: "0.08em", color: "var(--accent)", fontWeight: 700, textTransform: "uppercase" }}>{ministryLabel}</div>
-            <h1 style={{ margin: "2px 0 0", fontSize: 26, fontWeight: 700 }}>Volunteer Schedule</h1>
-          </div>
-          {isAdmin && <span className="mono" style={{ fontSize: 14, color: "var(--good)", border: "1px solid var(--good)55", padding: "3px 8px", borderRadius: 20 }}>admin</span>}
+      <div style={{ maxWidth: 880, margin: "0 auto", padding: "16px 26px 0", boxSizing: "border-box", position: "relative" }}>
+        {isAdmin && (
+          <span className="mono" style={{
+            position: "absolute", top: 16, right: 26,
+            fontSize: 14, color: "var(--good)", border: "1px solid var(--good)55", padding: "3px 8px", borderRadius: 20,
+          }}>admin</span>
+        )}
+        <div style={{ textAlign: "center", marginBottom: 14 }}>
+          <div style={{ fontSize: 15, letterSpacing: "0.08em", color: "var(--accent)", fontWeight: 700, textTransform: "uppercase" }}>{ministryLabel}</div>
+          <h1 style={{ margin: "2px 0 0", fontSize: 26, fontWeight: 700 }}>Volunteer Schedule</h1>
         </div>
-        <nav style={{ display: "flex", gap: 4 }}>
+        <nav style={{ display: "flex", justifyContent: "center", gap: 24 }}>
           {tabs.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
               background: "transparent", border: "none", color: tab === t.id ? "var(--text)" : "var(--muted)",
-              padding: "10px 4px", marginRight: 20, fontSize: 17, fontWeight: 600,
+              padding: "10px 4px", fontSize: 17, fontWeight: 600,
               borderBottom: tab === t.id ? "2px solid var(--accent)" : "2px solid transparent",
             }}>
               {t.label}
