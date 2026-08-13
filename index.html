@@ -202,6 +202,10 @@ function getMinistryLabel(key) {
 }
 
 // ---------- helpers ----------
+function lastNameOf(fullName) {
+  const parts = (fullName || "").trim().split(/\s+/);
+  return parts[parts.length - 1] || "";
+}
 function fmtDate(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   const dt = new Date(y, m - 1, d);
@@ -344,7 +348,7 @@ function App() {
 
     const unsubVol = onSnapshot(
       collection(db, volunteersCollectionName),
-      snap => setVolunteers(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.name.localeCompare(b.name))),
+      snap => setVolunteers(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => lastNameOf(a.name).localeCompare(lastNameOf(b.name)) || a.name.localeCompare(b.name))),
       err => window.showFatal && window.showFatal("Volunteers listener error: " + err.code + " — " + err.message)
     );
     const unsubSlots = onSnapshot(
