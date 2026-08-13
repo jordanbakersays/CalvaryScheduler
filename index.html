@@ -287,6 +287,31 @@ const inputStyle = {
   display: "block",
 };
 
+// Native date/time pickers (especially iOS Safari) can render slightly
+// wider than the box they're given. Instead of fighting that, the border
+// and background live on this wrapper (overflow: hidden clips anything
+// that tries to spill past it), and the input itself is transparent/borderless.
+const nativePickerWrapStyle = {
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  background: "var(--panel)",
+  overflow: "hidden",
+  width: "100%",
+  boxSizing: "border-box",
+};
+const nativePickerInputStyle = {
+  background: "transparent",
+  border: "none",
+  padding: "9px 10px",
+  color: "var(--text)",
+  fontSize: 18,
+  fontFamily: "inherit",
+  width: "100%",
+  minWidth: 0,
+  boxSizing: "border-box",
+  display: "block",
+};
+
 // ---------- App ----------
 function App() {
   const ministryKey = useMemo(() => getMinistryKey(), []);
@@ -360,7 +385,7 @@ function App() {
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <Header tab={tab} setTab={setTab} isAdmin={isAdmin} ministryLabel={ministryLabel} />
-      <main style={{ flex: 1, maxWidth: 880, margin: "0 auto", width: "100%", padding: "20px 16px 60px" }}>
+      <main style={{ flex: 1, maxWidth: 880, margin: "0 auto", width: "100%", padding: "20px 20px 60px", boxSizing: "border-box" }}>
         {tab === "schedule" && <ScheduleView slots={slots} isAdmin={isAdmin} />}
         {tab === "manage" && (isAdmin
           ? <ManageView volunteers={volunteers} slots={slots} showToast={showToast} volunteersCollectionName={volunteersCollectionName} slotsCollectionName={slotsCollectionName} />
@@ -394,7 +419,7 @@ function Header({ tab, setTab, isAdmin, ministryLabel }) {
   ];
   return (
     <header style={{ borderBottom: "1px solid var(--border)", position: "sticky", top: 0, background: "var(--bg)", zIndex: 10 }}>
-      <div style={{ maxWidth: 880, margin: "0 auto", padding: "16px 16px 0" }}>
+      <div style={{ maxWidth: 880, margin: "0 auto", padding: "16px 20px 0", boxSizing: "border-box" }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 14 }}>
           <div>
             <div style={{ fontSize: 15, letterSpacing: "0.08em", color: "var(--accent)", fontWeight: 700, textTransform: "uppercase" }}>{ministryLabel}</div>
@@ -566,15 +591,21 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
       <section>
         <SectionTitle>Add a shift</SectionTitle>
         <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 12, padding: 16, width: "100%", boxSizing: "border-box" }}>
-          <Field label="Date"><input style={inputStyle} type="date" value={sDate} onChange={e => setSDate(e.target.value)} /></Field>
+          <Field label="Date">
+            <div style={nativePickerWrapStyle}>
+              <input style={nativePickerInputStyle} type="date" value={sDate} onChange={e => setSDate(e.target.value)} />
+            </div>
+          </Field>
           <Field label="Time">
-            <input
-              style={{ ...inputStyle, opacity: sAllDay ? 0.4 : 1 }}
-              type="time"
-              value={sTime}
-              onChange={e => setSTime(e.target.value)}
-              disabled={sAllDay}
-            />
+            <div style={{ ...nativePickerWrapStyle, opacity: sAllDay ? 0.4 : 1 }}>
+              <input
+                style={nativePickerInputStyle}
+                type="time"
+                value={sTime}
+                onChange={e => setSTime(e.target.value)}
+                disabled={sAllDay}
+              />
+            </div>
           </Field>
           <div>
             <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 16, cursor: "pointer" }}>
