@@ -202,6 +202,28 @@ function getMinistryLabel(key) {
 }
 
 // ---------- helpers ----------
+function parseCSV(text) {
+  const rows = [];
+  let row = [], field = "", inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else { inQuotes = false; }
+      } else field += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ",") { row.push(field); field = ""; }
+      else if (c === "\n" || c === "\r") {
+        if (c === "\r" && text[i + 1] === "\n") i++;
+        row.push(field); rows.push(row); row = []; field = "";
+      } else field += c;
+    }
+  }
+  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(cell => cell.trim() !== ""));
+}
 function lastNameOf(fullName) {
   const parts = (fullName || "").trim().split(/\s+/);
   return parts[parts.length - 1] || "";
@@ -551,6 +573,58 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
     showToast("Volunteer added");
   }
 
+  const [csvImporting, setCsvImporting] = useState(false);
+
+  async function handleCSVFile(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+
+    setCsvImporting(true);
+    try {
+      const text = await file.text();
+      const rows = parseCSV(text);
+      if (rows.length === 0) {
+        showToast("No rows found in that file", "bad");
+        return;
+      }
+
+      const headerCells = rows[0].map(h => h.trim().toLowerCase());
+      let nameIdx = headerCells.findIndex(h => h.includes("name"));
+      let phoneIdx = headerCells.findIndex(h => h.includes("phone"));
+      let emailIdx = headerCells.findIndex(h => h.includes("email"));
+      let dataRows;
+      if (nameIdx !== -1) {
+        dataRows = rows.slice(1);
+      } else {
+        nameIdx = 0; phoneIdx = 1; emailIdx = 2;
+        dataRows = rows;
+      }
+
+      const existingNames = new Set(volunteers.map(v => (v.name || "").trim().toLowerCase()));
+      let added = 0, skipped = 0;
+
+      for (const r of dataRows) {
+        const name = (r[nameIdx] || "").trim();
+        if (!name) continue;
+        if (existingNames.has(name.toLowerCase())) { skipped++; continue; }
+        const phone = phoneIdx >= 0 ? (r[phoneIdx] || "").trim() : "";
+        const email = emailIdx >= 0 ? (r[emailIdx] || "").trim() : "";
+        await addDoc(collection(db, volunteersCollectionName), { name, phone, email });
+        existingNames.add(name.toLowerCase());
+        added++;
+      }
+
+      showToast(
+        skipped > 0 ? `Imported ${added} (skipped ${skipped} duplicate${skipped > 1 ? "s" : ""})` : `Imported ${added} volunteer${added === 1 ? "" : "s"}`
+      );
+    } catch (err) {
+      showToast("Couldn't read that file", "bad");
+    } finally {
+      setCsvImporting(false);
+    }
+  }
+
   async function removeVolunteer(id) {
     await deleteDoc(doc(db, volunteersCollectionName, id));
     showToast("Volunteer removed");
@@ -704,6 +778,27 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
 
       <section>
         <SectionTitle>Volunteers</SectionTitle>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+          <label style={{
+            padding: "8px 14px", borderRadius: 8, fontSize: 17, fontWeight: 600,
+            border: "1px solid var(--border)", background: "var(--panel-2)", color: "var(--text)",
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            width: "fit-content", cursor: csvImporting ? "not-allowed" : "pointer",
+            opacity: csvImporting ? 0.6 : 1,
+          }}>
+            {csvImporting ? "Importing…" : "Import from CSV"}
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              onChange={handleCSVFile}
+              disabled={csvImporting}
+              style={{ display: "none" }}
+            />
+          </label>
+          <div style={{ fontSize: 13, color: "var(--muted)" }}>
+            CSV should have a header row with Name, Phone, Email columns (any order) — or just three plain columns in that order. Rows matching an existing name are skipped.
+          </div>
+        </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 12, padding: 16, marginBottom: 12 }}>
           <Field label="Name"><input style={inputStyle} value={vName} onChange={e => setVName(e.target.value)} /></Field>
           <Field label="Phone"><input style={inputStyle} value={vPhone} onChange={e => setVPhone(e.target.value)} placeholder="313-555-0100" /></Field>
