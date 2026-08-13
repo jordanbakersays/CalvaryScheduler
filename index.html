@@ -625,7 +625,8 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
     }
   }
 
-  async function removeVolunteer(id) {
+  async function removeVolunteer(id, name) {
+    if (!window.confirm(`Remove ${name || "this volunteer"}? This can't be undone.`)) return;
     await deleteDoc(doc(db, volunteersCollectionName, id));
     showToast("Volunteer removed");
   }
@@ -733,17 +734,33 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
             <Field label="Assign volunteers (tap all that apply)">
               <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 220, overflowY: "auto", background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 8 }}>
                 {volunteers.length === 0 && <div style={{ fontSize: 15, color: "var(--muted)", padding: 6 }}>No volunteers yet — add some below first.</div>}
-                {volunteers.map(v => (
-                  <label key={v.id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 16, padding: "7px 6px", borderRadius: 6, cursor: "pointer" }}>
-                    <input
-                      type="checkbox"
-                      checked={sSelectedVolIds.includes(v.id)}
-                      onChange={() => toggleSelectedVol(v.id)}
-                      style={{ width: 20, height: 20, accentColor: "var(--accent)", flexShrink: 0 }}
-                    />
-                    {v.name}
-                  </label>
-                ))}
+                {volunteers.map(v => {
+                  const isChecked = sSelectedVolIds.includes(v.id);
+                  return (
+                    <div
+                      key={v.id}
+                      role="checkbox"
+                      aria-checked={isChecked}
+                      tabIndex={0}
+                      onClick={() => toggleSelectedVol(v.id)}
+                      onKeyDown={e => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggleSelectedVol(v.id); } }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 10, fontSize: 16,
+                        padding: "10px 6px", borderRadius: 6, cursor: "pointer",
+                        touchAction: "manipulation", userSelect: "none", WebkitTapHighlightColor: "transparent",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        readOnly
+                        tabIndex={-1}
+                        style={{ width: 20, height: 20, accentColor: "var(--accent)", flexShrink: 0, pointerEvents: "none" }}
+                      />
+                      {v.name}
+                    </div>
+                  );
+                })}
               </div>
             </Field>
             <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 6 }}>Leave everyone unchecked to add an open (unassigned) shift instead.</div>
@@ -829,7 +846,7 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
                   </div>
                   <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
                     <Button onClick={() => startEditVolunteer(v)}>Edit</Button>
-                    <Button variant="danger" onClick={() => removeVolunteer(v.id)}>Remove</Button>
+                    <Button variant="danger" onClick={() => removeVolunteer(v.id, v.name)}>Remove</Button>
                   </div>
                 </div>
               )}
