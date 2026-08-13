@@ -369,7 +369,6 @@ function AdminGate({ onSubmit, firstRun }) {
         onChange={e => setCode(e.target.value)}
         onKeyDown={e => e.key === "Enter" && onSubmit(code)}
         placeholder="Passcode"
-        autoFocus
       />
       <Button variant="accent" onClick={() => onSubmit(code)}>{firstRun ? "Set passcode" : "Unlock"}</Button>
     </div>
