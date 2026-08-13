@@ -222,7 +222,8 @@ function addDaysISO(iso, days) {
 }
 function buildReminderMessage(r) {
   const roleText = r.role ? ` (${r.role})` : "";
-  return `Hi ${r.volunteerName.split(" ")[0]}! Reminder: you're signed up to volunteer on ${fmtDate(r.date)} at ${r.time}${roleText}. Thanks for serving with Calvary Students!`;
+  const timeText = r.time ? ` at ${fmtTime(r.time)}` : "";
+  return `Hi ${r.volunteerName.split(" ")[0]}! Reminder: you're signed up to volunteer on ${fmtDate(r.date)}${timeText}${roleText}. Thanks for serving with Calvary Students!`;
 }
 async function copyToClipboard(text) {
   try {
@@ -460,11 +461,11 @@ function ScheduleView({ slots }) {
         <div key={date} style={{ display: "flex", gap: 14 }}>
           <div style={{ width: 3, background: "var(--border)", borderRadius: 2 }} />
           <div style={{ flex: 1 }}>
-            <div className="stub-font" style={{ fontSize: 30, color: "var(--accent)", fontWeight: 700, marginBottom: 12 }}>{fmtDate(date)}</div>
+            <div className="stub-font" style={{ fontSize: 30, color: "var(--text)", fontWeight: 700, marginBottom: 12 }}>{fmtDate(date)}</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
               {times.map(([time, items]) => (
                 <div key={time} className="ticket">
-                  <div className="ticket-hero-time">{fmtTime(time)}</div>
+                  <div className="ticket-hero-time">{time ? fmtTime(time) : "All Day"}</div>
                   <div className="ticket-divider" />
                   <div className="ticket-names">
                     {items.map(s => (
@@ -499,8 +500,13 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
 
   const [sDate, setSDate] = useState(todayISO());
   const [sTime, setSTime] = useState("09:00");
+  const [sAllDay, setSAllDay] = useState(false);
   const [sRole, setSRole] = useState("");
-  const [sVolunteer, setSVolunteer] = useState("");
+  const [sSelectedVolIds, setSSelectedVolIds] = useState([]);
+
+  function toggleSelectedVol(id) {
+    setSSelectedVolIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }
 
   async function addVolunteer() {
     if (!vName.trim()) return;
@@ -515,15 +521,28 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
   }
 
   async function addSlot() {
-    if (!sDate || !sTime) return;
-    const vol = volunteers.find(v => v.id === sVolunteer);
-    await addDoc(collection(db, slotsCollectionName), {
-      date: sDate, time: sTime, role: sRole.trim(),
-      volunteerId: vol ? vol.id : null, volunteerName: vol ? vol.name : null,
-      reminderSentAt: null,
-    });
-    setSRole(""); setSVolunteer("");
-    showToast("Shift added");
+    const effectiveTime = sAllDay ? "" : sTime;
+    if (!sDate || (!sAllDay && !sTime)) return;
+    if (sSelectedVolIds.length === 0) {
+      await addDoc(collection(db, slotsCollectionName), {
+        date: sDate, time: effectiveTime, role: sRole.trim(),
+        volunteerId: null, volunteerName: null,
+        reminderSentAt: null,
+      });
+      showToast("Open shift added");
+    } else {
+      await Promise.all(sSelectedVolIds.map(id => {
+        const vol = volunteers.find(v => v.id === id);
+        return addDoc(collection(db, slotsCollectionName), {
+          date: sDate, time: effectiveTime, role: sRole.trim(),
+          volunteerId: vol.id, volunteerName: vol.name,
+          reminderSentAt: null,
+        });
+      }));
+      showToast(`Added ${sSelectedVolIds.length} volunteer${sSelectedVolIds.length > 1 ? "s" : ""}`);
+    }
+    setSRole("");
+    setSSelectedVolIds([]);
   }
 
   async function updateSlotVolunteer(slotId, volunteerId) {
@@ -544,16 +563,56 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
         <SectionTitle>Add a shift</SectionTitle>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 12, padding: 16 }}>
           <Field label="Date"><input style={inputStyle} type="date" value={sDate} onChange={e => setSDate(e.target.value)} /></Field>
-          <Field label="Time"><input style={inputStyle} type="time" value={sTime} onChange={e => setSTime(e.target.value)} /></Field>
-          <Field label="Role / notes (optional)"><input style={inputStyle} value={sRole} onChange={e => setSRole(e.target.value)} placeholder="e.g. Check-in table" /></Field>
-          <Field label="Assign volunteer">
-            <select style={inputStyle} value={sVolunteer} onChange={e => setSVolunteer(e.target.value)}>
-              <option value="">— Open (unassigned) —</option>
-              {volunteers.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-            </select>
+          <Field label="Time">
+            <input
+              style={{ ...inputStyle, opacity: sAllDay ? 0.4 : 1 }}
+              type="time"
+              value={sTime}
+              onChange={e => setSTime(e.target.value)}
+              disabled={sAllDay}
+            />
           </Field>
           <div style={{ gridColumn: "1 / -1" }}>
-            <Button variant="accent" onClick={addSlot}>Add shift</Button>
+            <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 16, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={sAllDay}
+                onChange={e => setSAllDay(e.target.checked)}
+                style={{ width: 20, height: 20, accentColor: "var(--accent)", flexShrink: 0 }}
+              />
+              All day (no specific time — assign for the whole date)
+            </label>
+          </div>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <Field label="Role / notes (optional — applies to everyone added below)">
+              <input style={inputStyle} value={sRole} onChange={e => setSRole(e.target.value)} placeholder="e.g. Check-in table" />
+            </Field>
+          </div>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <Field label="Assign volunteers (tap all that apply)">
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 220, overflowY: "auto", background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 8 }}>
+                {volunteers.length === 0 && <div style={{ fontSize: 15, color: "var(--muted)", padding: 6 }}>No volunteers yet — add some below first.</div>}
+                {volunteers.map(v => (
+                  <label key={v.id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 16, padding: "7px 6px", borderRadius: 6, cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={sSelectedVolIds.includes(v.id)}
+                      onChange={() => toggleSelectedVol(v.id)}
+                      style={{ width: 20, height: 20, accentColor: "var(--accent)", flexShrink: 0 }}
+                    />
+                    {v.name}
+                  </label>
+                ))}
+              </div>
+            </Field>
+            <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 6 }}>Leave everyone unchecked to add an open (unassigned) shift instead.</div>
+          </div>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <Button variant="accent" onClick={addSlot}>
+              {sSelectedVolIds.length > 0
+                ? `Add ${sSelectedVolIds.length} volunteer${sSelectedVolIds.length > 1 ? "s" : ""} to this shift`
+                : "Add open shift"}
+            </Button>
           </div>
         </div>
       </section>
@@ -564,7 +623,7 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {sortedSlots.map(s => (
             <div key={s.id} style={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 10, padding: 12, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-              <div className="mono" style={{ fontSize: 16, color: "var(--accent)", minWidth: 150 }}>{fmtDate(s.date)} · {s.time}</div>
+              <div className="mono" style={{ fontSize: 16, color: "var(--accent)", minWidth: 150 }}>{fmtDate(s.date)} · {s.time ? fmtTime(s.time) : "All day"}</div>
               {s.role && <div style={{ fontSize: 16, color: "var(--muted)" }}>{s.role}</div>}
               <select style={{ ...inputStyle, marginLeft: "auto" }} value={s.volunteerId || ""} onChange={e => updateSlotVolunteer(s.id, e.target.value)}>
                 <option value="">— Open —</option>
@@ -701,7 +760,7 @@ function RemindersView({ volunteers, slots, showToast, slotsCollectionName, mini
             <div key={s.id} style={{ background: "var(--panel)", border: "1px solid var(--border)", borderLeft: "4px solid var(--accent)", borderRadius: 10, padding: 14, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
               <div style={{ minWidth: 160 }}>
                 <div style={{ fontWeight: 600, fontSize: 18 }}>{s.volunteerName}</div>
-                <div className="stub-font" style={{ fontSize: 14, color: "var(--accent)" }}>{fmtDate(s.date)} · {s.time}</div>
+                <div className="stub-font" style={{ fontSize: 14, color: "var(--accent)" }}>{fmtDate(s.date)} · {s.time ? fmtTime(s.time) : "All day"}</div>
               </div>
               <div style={{ fontSize: 15, color: "var(--muted)", flex: 1, minWidth: 120 }}>
                 {s.phone || <span style={{ color: "var(--bad)" }}>no phone</span>}
