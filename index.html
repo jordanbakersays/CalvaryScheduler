@@ -67,19 +67,16 @@
   });
 </script>
 
-<!-- Firebase (modular SDK) -->
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import {
-    getFirestore, collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc,
-    onSnapshot, setDoc, query, orderBy
-  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-
+<!-- Firebase (compat/classic SDK — avoids <script type="module"> entirely,
+     since some hosts/proxies mangle module scripts) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
   // ------------------------------------------------------------------
   // FIREBASE CONFIG — replace with your own project's config values.
   // See README.md "Step 1" for where to get these.
   // ------------------------------------------------------------------
-  const firebaseConfig = {
+  var firebaseConfig = {
     apiKey: "AIzaSyAS8yCrCtKSltUCvPViZJrScUBy8dkiPMU",
     authDomain: "schedulercs.firebaseapp.com",
     projectId: "schedulercs",
@@ -89,11 +86,29 @@
   };
 
   try {
-    const fbApp = initializeApp(firebaseConfig);
-    const db = getFirestore(fbApp);
+    firebase.initializeApp(firebaseConfig);
+    var db = firebase.firestore();
 
-    // Expose a small bridge so the React app (loaded as a classic script
-    // below) can use Firestore without everything living in a module.
+    // Small wrapper layer so the React app below can call these with the
+    // same shape as the modern modular Firestore API, while everything
+    // underneath actually runs on the classic/compat SDK.
+    function collection(dbRef, name) { return dbRef.collection(name); }
+    function doc(dbRef, collName, docId) { return dbRef.collection(collName).doc(docId); }
+    function orderBy(field) { return { type: "orderBy", field: field }; }
+    function query(collRef, constraint) {
+      return constraint && constraint.type === "orderBy" ? collRef.orderBy(constraint.field) : collRef;
+    }
+    function onSnapshot(ref, onNext, onError) { return ref.onSnapshot(onNext, onError); }
+    async function getDoc(docRef) {
+      const snap = await docRef.get();
+      return { exists: () => snap.exists, data: () => snap.data(), id: snap.id };
+    }
+    async function getDocs(collRef) { return collRef.get(); }
+    async function addDoc(collRef, data) { return collRef.add(data); }
+    async function updateDoc(docRef, data) { return docRef.update(data); }
+    async function deleteDoc(docRef) { return docRef.delete(); }
+    async function setDoc(docRef, data) { return docRef.set(data); }
+
     window.__fb = {
       db, collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc,
       onSnapshot, setDoc, query, orderBy
