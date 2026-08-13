@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>Volunteer Schedule</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=Quicksand:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=Quicksand:wght@500;600;700&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg: #1c1d21;
@@ -14,6 +14,7 @@
     --border: #35373e;
     --accent: #e8a33d;
     --accent-dim: #e8a33d33;
+    --accent2: #d1594e;
     --text: #f5f3ee;
     --muted: #9b9ca3;
     --good: #6fbf73;
@@ -29,6 +30,7 @@
   }
   h1, h2, h3 { font-family: 'Quicksand', 'Nunito', system-ui, sans-serif; }
   .mono { font-family: 'Nunito', system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+  .stub-font { font-family: 'Oswald', 'Nunito', system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.03em; }
   button {
     font-family: inherit;
     cursor: pointer;
@@ -42,7 +44,63 @@
   @media (prefers-reduced-motion: reduce) {
     * { transition: none !important; animation: none !important; }
   }
+
+  /* ---- ticket-stub styling ---- */
+  .marquee-stripe {
+    height: 5px;
+    background: repeating-linear-gradient(
+      -45deg,
+      var(--accent), var(--accent) 10px,
+      var(--accent2) 10px, var(--accent2) 20px
+    );
+  }
+  .ticket {
+    position: relative;
+    display: flex;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: visible;
+  }
+  .ticket-main {
+    flex: 1;
+    min-width: 0;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+  }
+  .ticket-stub {
+    position: relative;
+    flex-shrink: 0;
+    min-width: 84px;
+    padding: 12px 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    border-left: 2px dashed var(--border);
+    background: var(--panel-2);
+    border-top-right-radius: 14px;
+    border-bottom-right-radius: 14px;
+  }
+  .ticket-stub::before,
+  .ticket-stub::after {
+    content: "";
+    position: absolute;
+    left: -9px;
+    width: 18px;
+    height: 18px;
+    background: var(--bg);
+    border-radius: 50%;
+    border: 1px solid var(--border);
+  }
+  .ticket-stub::before { top: -10px; }
+  .ticket-stub::after { bottom: -10px; }
 </style>
+
 </head>
 <body>
 <div id="fatal-banner" style="display:none; position:fixed; top:0; left:0; right:0; background:#3a1a1a; color:#ffb4ab; padding:14px 16px; font-family:monospace; font-size:13px; white-space:pre-wrap; z-index:9999; border-bottom:2px solid #e2645a; max-height:50vh; overflow:auto;"></div>
@@ -331,7 +389,9 @@ function Header({ tab, setTab, isAdmin, ministryLabel }) {
     { id: "reminders", label: "Reminders" },
   ];
   return (
-    <header style={{ borderBottom: "1px solid var(--border)", position: "sticky", top: 0, background: "var(--bg)", zIndex: 10 }}>
+    <header style={{ position: "sticky", top: 0, zIndex: 10 }}>
+      <div className="marquee-stripe" />
+      <div style={{ borderBottom: "1px solid var(--border)", background: "var(--bg)" }}>
       <div style={{ maxWidth: 880, margin: "0 auto", padding: "16px 16px 0" }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 14 }}>
           <div>
@@ -351,6 +411,7 @@ function Header({ tab, setTab, isAdmin, ministryLabel }) {
             </button>
           ))}
         </nav>
+      </div>
       </div>
     </header>
   );
@@ -392,20 +453,22 @@ function ScheduleView({ slots }) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
       {grouped.map(([date, items]) => (
         <div key={date} style={{ display: "flex", gap: 14 }}>
           <div style={{ width: 3, background: "var(--border)", borderRadius: 2 }} />
           <div style={{ flex: 1 }}>
-            <div className="mono" style={{ fontSize: 16, color: "var(--accent)", fontWeight: 600, marginBottom: 8 }}>{fmtDate(date)}</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div className="stub-font" style={{ fontSize: 15, color: "var(--accent)", fontWeight: 600, marginBottom: 10 }}>{fmtDate(date)}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
               {items.sort((a,b) => a.time.localeCompare(b.time)).map(s => (
-                <div key={s.id} style={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-                  <div>
+                <div key={s.id} className="ticket">
+                  <div className="ticket-main">
                     <div style={{ fontWeight: 600, fontSize: 18 }}>{s.volunteerName || <span style={{ color: "var(--muted)" }}>Open</span>}</div>
                     {s.role && <div style={{ fontSize: 16, color: "var(--muted)" }}>{s.role}</div>}
                   </div>
-                  <div className="mono" style={{ fontSize: 17, color: "var(--muted)" }}>{s.time}</div>
+                  <div className="ticket-stub">
+                    <div className="stub-font" style={{ fontSize: 17, color: "var(--accent)", fontWeight: 600 }}>{s.time}</div>
+                  </div>
                 </div>
               ))}
             </div>
@@ -624,14 +687,14 @@ function RemindersView({ volunteers, slots, showToast, slotsCollectionName, mini
 
       {upcoming.length === 0 && <Empty text="No assigned shifts in this window." />}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {upcoming.map(s => {
           const status = s.reminderSentAt ? "sent" : emailStatus[s.id];
           return (
-            <div key={s.id} style={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 10, padding: 14, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+            <div key={s.id} style={{ background: "var(--panel)", border: "1px solid var(--border)", borderLeft: "4px solid var(--accent)", borderRadius: 10, padding: 14, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
               <div style={{ minWidth: 160 }}>
                 <div style={{ fontWeight: 600, fontSize: 18 }}>{s.volunteerName}</div>
-                <div className="mono" style={{ fontSize: 15, color: "var(--muted)" }}>{fmtDate(s.date)} · {s.time}</div>
+                <div className="stub-font" style={{ fontSize: 14, color: "var(--accent)" }}>{fmtDate(s.date)} · {s.time}</div>
               </div>
               <div style={{ fontSize: 15, color: "var(--muted)", flex: 1, minWidth: 120 }}>
                 {s.phone || <span style={{ color: "var(--bad)" }}>no phone</span>}
