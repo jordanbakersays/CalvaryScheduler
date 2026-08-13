@@ -505,7 +505,12 @@ function ScheduleView({ slots }) {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, byTime]) => ({
         date,
-        times: Object.entries(byTime).sort(([a], [b]) => a.localeCompare(b)),
+        times: Object.entries(byTime)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([time, items]) => [
+            time,
+            [...items].sort((a, b) => lastNameOf(a.volunteerName).localeCompare(lastNameOf(b.volunteerName)) || (a.volunteerName || "").localeCompare(b.volunteerName || "")),
+          ]),
       }));
   }, [slots]);
 
@@ -691,7 +696,7 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
     showToast("Shift removed");
   }
 
-  const sortedSlots = [...slots].sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time));
+  const sortedSlots = [...slots].sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time) || lastNameOf(a.volunteerName).localeCompare(lastNameOf(b.volunteerName)));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
@@ -883,6 +888,9 @@ function RemindersView({ volunteers, slots, showToast, slotsCollectionName, mini
       const key = s.date + "|" + s.time;
       if (!map[key]) map[key] = { key, date: s.date, time: s.time, items: [] };
       map[key].items.push(s);
+    }
+    for (const g of Object.values(map)) {
+      g.items.sort((a, b) => lastNameOf(a.volunteerName).localeCompare(lastNameOf(b.volunteerName)) || (a.volunteerName || "").localeCompare(b.volunteerName || ""));
     }
     return Object.values(map).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   }, [upcoming]);
