@@ -46,59 +46,52 @@
   }
 
   /* ---- ticket-stub styling ---- */
-  .marquee-stripe {
-    height: 5px;
-    background: repeating-linear-gradient(
-      -45deg,
-      var(--accent), var(--accent) 10px,
-      var(--accent2) 10px, var(--accent2) 20px
-    );
-  }
   .ticket {
     position: relative;
-    display: flex;
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 14px;
+    padding: 16px 18px;
     overflow: visible;
   }
-  .ticket-main {
-    flex: 1;
-    min-width: 0;
-    padding: 14px 16px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 3px;
+  .ticket-hero-time {
+    font-family: 'Oswald', 'Nunito', system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 30px;
+    line-height: 1.15;
   }
-  .ticket-stub {
+  .ticket-divider {
     position: relative;
-    flex-shrink: 0;
-    min-width: 84px;
-    padding: 12px 10px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 2px;
-    border-left: 2px dashed var(--border);
-    background: var(--panel-2);
-    border-top-right-radius: 14px;
-    border-bottom-right-radius: 14px;
+    margin: 12px -18px 14px;
+    border-top: 2px dashed var(--border);
   }
-  .ticket-stub::before,
-  .ticket-stub::after {
+  .ticket-divider::before,
+  .ticket-divider::after {
     content: "";
     position: absolute;
-    left: -9px;
+    top: -9px;
     width: 18px;
     height: 18px;
     background: var(--bg);
     border-radius: 50%;
     border: 1px solid var(--border);
   }
-  .ticket-stub::before { top: -10px; }
-  .ticket-stub::after { bottom: -10px; }
+  .ticket-divider::before { left: -9px; }
+  .ticket-divider::after { right: -9px; }
+  .ticket-names {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .ticket-name-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+  }
 </style>
 
 </head>
@@ -210,6 +203,12 @@ function fmtDate(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   const dt = new Date(y, m - 1, d);
   return dt.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+function fmtTime(hhmm) {
+  const [h, m] = hhmm.split(":").map(Number);
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return m === 0 ? `${h12} ${period}` : `${h12}:${String(m).padStart(2,"0")} ${period}`;
 }
 function todayISO() {
   const d = new Date();
@@ -389,9 +388,7 @@ function Header({ tab, setTab, isAdmin, ministryLabel }) {
     { id: "reminders", label: "Reminders" },
   ];
   return (
-    <header style={{ position: "sticky", top: 0, zIndex: 10 }}>
-      <div className="marquee-stripe" />
-      <div style={{ borderBottom: "1px solid var(--border)", background: "var(--bg)" }}>
+    <header style={{ borderBottom: "1px solid var(--border)", position: "sticky", top: 0, background: "var(--bg)", zIndex: 10 }}>
       <div style={{ maxWidth: 880, margin: "0 auto", padding: "16px 16px 0" }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 14 }}>
           <div>
@@ -411,7 +408,6 @@ function Header({ tab, setTab, isAdmin, ministryLabel }) {
             </button>
           ))}
         </nav>
-      </div>
       </div>
     </header>
   );
@@ -440,12 +436,18 @@ function AdminGate({ onSubmit, firstRun }) {
 // ---------- Schedule (public) ----------
 function ScheduleView({ slots }) {
   const grouped = useMemo(() => {
-    const map = {};
+    const byDate = {};
     for (const s of slots) {
-      if (!map[s.date]) map[s.date] = [];
-      map[s.date].push(s);
+      if (!byDate[s.date]) byDate[s.date] = {};
+      if (!byDate[s.date][s.time]) byDate[s.date][s.time] = [];
+      byDate[s.date][s.time].push(s);
     }
-    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b));
+    return Object.entries(byDate)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, byTime]) => ({
+        date,
+        times: Object.entries(byTime).sort(([a], [b]) => a.localeCompare(b)),
+      }));
   }, [slots]);
 
   if (grouped.length === 0) {
@@ -453,21 +455,26 @@ function ScheduleView({ slots }) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-      {grouped.map(([date, items]) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 26 }}>
+      {grouped.map(({ date, times }) => (
         <div key={date} style={{ display: "flex", gap: 14 }}>
           <div style={{ width: 3, background: "var(--border)", borderRadius: 2 }} />
           <div style={{ flex: 1 }}>
-            <div className="stub-font" style={{ fontSize: 15, color: "var(--accent)", fontWeight: 600, marginBottom: 10 }}>{fmtDate(date)}</div>
+            <div className="stub-font" style={{ fontSize: 18, color: "var(--text)", fontWeight: 600, marginBottom: 12 }}>{fmtDate(date)}</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-              {items.sort((a,b) => a.time.localeCompare(b.time)).map(s => (
-                <div key={s.id} className="ticket">
-                  <div className="ticket-main">
-                    <div style={{ fontWeight: 600, fontSize: 18 }}>{s.volunteerName || <span style={{ color: "var(--muted)" }}>Open</span>}</div>
-                    {s.role && <div style={{ fontSize: 16, color: "var(--muted)" }}>{s.role}</div>}
-                  </div>
-                  <div className="ticket-stub">
-                    <div className="stub-font" style={{ fontSize: 17, color: "var(--accent)", fontWeight: 600 }}>{s.time}</div>
+              {times.map(([time, items]) => (
+                <div key={time} className="ticket">
+                  <div className="ticket-hero-time">{fmtTime(time)}</div>
+                  <div className="ticket-divider" />
+                  <div className="ticket-names">
+                    {items.map(s => (
+                      <div key={s.id} className="ticket-name-row">
+                        <span style={{ fontSize: 15, color: "var(--muted)", fontWeight: 500 }}>
+                          {s.volunteerName || <span style={{ fontStyle: "italic" }}>Open</span>}
+                        </span>
+                        {s.role && <span style={{ fontSize: 13, color: "var(--muted)" }}>{s.role}</span>}
+                      </div>
+                    ))}
                   </div>
                 </div>
               ))}
