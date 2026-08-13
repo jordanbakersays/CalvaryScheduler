@@ -935,9 +935,18 @@ function RemindersView({ volunteers, slots, showToast, slotsCollectionName, mini
     showToast(ok ? `Copied ${withPhones.length} number(s)` : "Couldn't copy — select manually", ok ? "good" : "bad");
   }
 
-  async function copyOne(text, label) {
-    const ok = await copyToClipboard(text);
-    showToast(ok ? `${label} copied` : "Couldn't copy", ok ? "good" : "bad");
+  async function copyMessages() {
+    const selectedGroups = shiftGroups.filter(g => selectedKeys.has(g.key));
+    if (selectedGroups.length === 0) {
+      showToast("Nothing selected", "bad");
+      return;
+    }
+    const lines = selectedGroups.map(g => `• ${fmtDate(g.date)}${g.time ? ` at ${fmtTime(g.time)}` : " (All day)"}`);
+    const msg = selectedGroups.length === 1
+      ? `Hi! Just a reminder you're scheduled to volunteer on ${fmtDate(selectedGroups[0].date)}${selectedGroups[0].time ? ` at ${fmtTime(selectedGroups[0].time)}` : " (all day)"}.\n\nThanks for serving with us!`
+      : `Hi! Just a reminder you're scheduled to volunteer:\n${lines.join("\n")}\n\nThanks for serving with us!`;
+    const ok = await copyToClipboard(msg);
+    showToast(ok ? "Message copied" : "Couldn't copy", ok ? "good" : "bad");
   }
 
   async function sendEmails() {
@@ -1000,6 +1009,9 @@ function RemindersView({ volunteers, slots, showToast, slotsCollectionName, mini
         }}>
           <Button onClick={copyAllNumbers} disabled={withPhones.length === 0}>
             Copy {withPhones.length || ""} number{withPhones.length === 1 ? "" : "s"}
+          </Button>
+          <Button onClick={copyMessages} disabled={selectedKeys.size === 0}>
+            Copy message
           </Button>
           <Button variant="accent" onClick={sendEmails} disabled={sending || pendingEmailCount === 0}>
             {sending ? "Sending…" : `Send ${pendingEmailCount || ""} email${pendingEmailCount === 1 ? "" : "s"}`}
@@ -1064,12 +1076,8 @@ function RemindersView({ volunteers, slots, showToast, slotsCollectionName, mini
                               {s.phone || <span style={{ color: "var(--bad)" }}>no phone</span>}
                               {s.email ? ` · ${s.email}` : <span style={{ color: "var(--bad)" }}> · no email</span>}
                             </div>
-                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                              <Button onClick={() => copyOne(s.phone, "Number")} disabled={!s.phone}>Copy #</Button>
-                              <Button onClick={() => copyOne(buildReminderMessage(s), "Message")}>Copy msg</Button>
-                              {status === "sent" && <span style={{ fontSize: 14, color: "var(--good)" }}>✓ emailed</span>}
-                              {status === "error" && <span style={{ fontSize: 14, color: "var(--bad)" }}>✗ failed</span>}
-                            </div>
+                            {status === "sent" && <span style={{ fontSize: 14, color: "var(--good)" }}>✓ emailed</span>}
+                            {status === "error" && <span style={{ fontSize: 14, color: "var(--bad)" }}>✗ failed</span>}
                           </div>
                         );
                       })}
