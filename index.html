@@ -135,12 +135,11 @@ const MINISTRIES = {
   students: { label: "Calvary Students" },
   kids: { label: "Calvary Kids" },
 };
-const DEFAULT_MINISTRY = "students";
 
 function getMinistryKey() {
   const params = new URLSearchParams(window.location.search);
   const key = params.get("org");
-  return (key && MINISTRIES[key]) ? key : DEFAULT_MINISTRY;
+  return (key && MINISTRIES[key]) ? key : null;
 }
 function getMinistryLabel(key) {
   return MINISTRIES[key]?.label || key;
@@ -248,7 +247,7 @@ function App() {
   }, [fbReady]);
 
   useEffect(() => {
-    if (!fbReady) return;
+    if (!fbReady || !ministryKey) return;
     const { db, collection, onSnapshot, query, orderBy, doc, getDoc } = window.__fb;
 
     const unsubVol = onSnapshot(
@@ -266,7 +265,7 @@ function App() {
       else setPasscode(null);
     }).catch(err => window.showFatal && window.showFatal("Config read error: " + err.code + " — " + err.message));
     return () => { unsubVol(); unsubSlots(); };
-  }, [fbReady, volunteersCollectionName, slotsCollectionName, adminDocId]);
+  }, [fbReady, ministryKey, volunteersCollectionName, slotsCollectionName, adminDocId]);
 
   function showToast(msg, kind = "good") {
     setToast({ msg, kind });
@@ -288,6 +287,10 @@ function App() {
     } else {
       showToast("Wrong passcode", "bad");
     }
+  }
+
+  if (!ministryKey) {
+    return <MinistryPicker />;
   }
 
   if (!fbReady) {
@@ -321,6 +324,31 @@ function App() {
 
 function Centered({ children }) {
   return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}>{children}</div>;
+}
+
+function MinistryPicker() {
+  function go(key) {
+    const params = new URLSearchParams(window.location.search);
+    params.set("org", key);
+    window.location.search = params.toString();
+  }
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ maxWidth: 360, width: "100%", display: "flex", flexDirection: "column", gap: 16, textAlign: "center" }}>
+        <div>
+          <h1 style={{ margin: "0 0 4px", fontSize: 22, fontWeight: 700 }}>Volunteer Schedule</h1>
+          <div style={{ fontSize: 14, color: "var(--muted)" }}>Which ministry?</div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {Object.entries(MINISTRIES).map(([key, m]) => (
+            <Button key={key} variant="accent" onClick={() => go(key)} style={{ padding: "14px 16px", fontSize: 15 }}>
+              {m.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function Header({ tab, setTab, isAdmin, ministryLabel }) {
