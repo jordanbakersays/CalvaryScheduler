@@ -44,7 +44,28 @@
 </style>
 </head>
 <body>
+<div id="fatal-banner" style="display:none; position:fixed; top:0; left:0; right:0; background:#3a1a1a; color:#ffb4ab; padding:14px 16px; font-family:monospace; font-size:13px; white-space:pre-wrap; z-index:9999; border-bottom:2px solid #e2645a; max-height:50vh; overflow:auto;"></div>
 <div id="root"></div>
+
+<script>
+  // Catches ANY error (even before React/Firebase load) and shows it
+  // on screen instead of silently failing. This is a debugging aid —
+  // safe to leave in.
+  function showFatal(msg) {
+    var el = document.getElementById("fatal-banner");
+    el.style.display = "block";
+    el.textContent = (el.textContent ? el.textContent + "\n\n" : "") + msg;
+  }
+  window.showFatal = showFatal;
+  window.addEventListener("error", function (e) {
+    showFatal("Error: " + (e.message || e.type) + (e.filename ? ("\n" + e.filename + ":" + e.lineno) : ""));
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var reason = e.reason;
+    var msg = (reason && (reason.message || reason.code)) ? (reason.code ? reason.code + " — " + reason.message : reason.message) : String(reason);
+    showFatal("Unhandled promise rejection: " + msg);
+  });
+</script>
 
 <!-- Firebase (modular SDK) -->
 <script type="module">
@@ -67,16 +88,20 @@
     appId: "1:733761692220:web:2d87567543e20cf39e5939"
   };
 
-  const fbApp = initializeApp(firebaseConfig);
-  const db = getFirestore(fbApp);
+  try {
+    const fbApp = initializeApp(firebaseConfig);
+    const db = getFirestore(fbApp);
 
-  // Expose a small bridge so the React app (loaded as a classic script
-  // below) can use Firestore without everything living in a module.
-  window.__fb = {
-    db, collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc,
-    onSnapshot, setDoc, query, orderBy
-  };
-  window.dispatchEvent(new Event("fb-ready"));
+    // Expose a small bridge so the React app (loaded as a classic script
+    // below) can use Firestore without everything living in a module.
+    window.__fb = {
+      db, collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc,
+      onSnapshot, setDoc, query, orderBy
+    };
+    window.dispatchEvent(new Event("fb-ready"));
+  } catch (err) {
+    showFatal("Firebase failed to initialize: " + (err && err.message ? err.message : String(err)));
+  }
 </script>
 
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -210,16 +235,20 @@ function App() {
     if (!fbReady) return;
     const { db, collection, onSnapshot, query, orderBy, doc, getDoc } = window.__fb;
 
-    const unsubVol = onSnapshot(collection(db, volunteersCollectionName), snap => {
-      setVolunteers(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.name.localeCompare(b.name)));
-    });
-    const unsubSlots = onSnapshot(query(collection(db, slotsCollectionName), orderBy("date")), snap => {
-      setSlots(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
+    const unsubVol = onSnapshot(
+      collection(db, volunteersCollectionName),
+      snap => setVolunteers(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.name.localeCompare(b.name))),
+      err => window.showFatal && window.showFatal("Volunteers listener error: " + err.code + " — " + err.message)
+    );
+    const unsubSlots = onSnapshot(
+      query(collection(db, slotsCollectionName), orderBy("date")),
+      snap => setSlots(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      err => window.showFatal && window.showFatal("Slots listener error: " + err.code + " — " + err.message)
+    );
     getDoc(doc(db, "config", adminDocId)).then(snap => {
       if (snap.exists()) setPasscode(snap.data().passcode);
       else setPasscode(null);
-    });
+    }).catch(err => window.showFatal && window.showFatal("Config read error: " + err.code + " — " + err.message));
     return () => { unsubVol(); unsubSlots(); };
   }, [fbReady, volunteersCollectionName, slotsCollectionName, adminDocId]);
 
