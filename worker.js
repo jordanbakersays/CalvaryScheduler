@@ -3,11 +3,13 @@
 // to the static files (index.html, etc.) via the ASSETS binding.
 //
 // Requires these to be set as this Worker's environment variables/secrets
-// (Cloudflare dashboard -> your Worker -> Settings -> Variables and Secrets):
-//   RESEND_API_KEY   - your Resend API key
-//   FROM_EMAIL        - the "from" address, e.g. reminders@yourdomain.com
-//                        (must be on a domain you've verified in Resend,
-//                        or use Resend's onboarding@resend.dev for testing)
+// (set via `wrangler secret put`, not the dashboard, so they survive
+// git-triggered redeploys):
+//   BREVO_API_KEY   - your Brevo API key (Settings -> SMTP & API -> API Keys in Brevo)
+//   FROM_EMAIL       - the "from" address, e.g. barn@cbcjoy.org
+//                       (must be a verified sender in Brevo -- Settings ->
+//                       Senders, Domains & Dedicated IPs -- no DNS/domain
+//                       verification required, just click the email link)
 
 export default {
   async fetch(request, env, ctx) {
@@ -41,11 +43,11 @@ async function handleSendReminders(request, env) {
   };
   const ministryLabel = MINISTRY_LABELS[body.ministryKey] || "the team";
 
-  if (!env.RESEND_API_KEY) {
-    return json({ error: "RESEND_API_KEY is not configured on this Worker" }, 500);
+  if (!env.BREVO_API_KEY) {
+    return json({ error: "BREVO_API_KEY is not configured on this Worker" }, 500);
   }
 
-  const fromEmail = env.FROM_EMAIL || "onboarding@resend.dev";
+  const fromEmail = env.FROM_EMAIL || "barn@cbcjoy.org";
   const results = [];
 
   for (const r of reminders) {
@@ -54,17 +56,18 @@ async function handleSendReminders(request, env) {
       continue;
     }
     try {
-      const res = await fetch("https://api.resend.com/emails", {
+      const res = await fetch("https://api.brevo.com/v3/smtp/email", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+          "api-key": env.BREVO_API_KEY,
           "Content-Type": "application/json",
+          "Accept": "application/json",
         },
         body: JSON.stringify({
-          from: fromEmail,
-          to: r.email,
+          sender: { email: fromEmail, name: ministryLabel },
+          to: [{ email: r.email, name: r.volunteerName || undefined }],
           subject: `Reminder: you're scheduled ${formatDate(r.date)}`,
-          text: buildMessage(r, ministryLabel),
+          textContent: buildMessage(r, ministryLabel),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -85,8 +88,9 @@ function formatDate(iso) {
 
 function buildMessage(r, ministryLabel) {
   const roleText = r.role ? ` (${r.role})` : "";
+  const timeText = r.time ? ` at ${r.time}` : "";
   const firstName = (r.volunteerName || "").split(" ")[0] || "there";
-  return `Hi ${firstName},\n\nJust a reminder that you're scheduled to volunteer on ${formatDate(r.date)} at ${r.time}${roleText}.\n\nThanks for serving with ${ministryLabel}!`;
+  return `Hi ${firstName},\n\nJust a reminder that you're scheduled to volunteer on ${formatDate(r.date)}${timeText}${roleText}.\n\nThanks for serving with ${ministryLabel}!`;
 }
 
 function json(obj, status = 200) {
