@@ -862,22 +862,20 @@ function SectionTitle({ children }) {
 // ---------- Reminders (admin) ----------
 function RemindersView({ volunteers, slots, showToast, slotsCollectionName, ministryKey }) {
   const { db, doc, updateDoc } = window.__fb;
-  const [windowDays, setWindowDays] = useState(3);
   const [sending, setSending] = useState(false);
   const [emailStatus, setEmailStatus] = useState({}); // slotId -> "sent" | "error"
   const [selectedKeys, setSelectedKeys] = useState(() => new Set());
 
   const upcoming = useMemo(() => {
     const today = todayISO();
-    const cutoff = addDaysISO(today, windowDays);
     return slots
-      .filter(s => s.volunteerId && s.date >= today && s.date <= cutoff)
+      .filter(s => s.volunteerId && s.date >= today)
       .map(s => {
         const vol = volunteers.find(v => v.id === s.volunteerId);
         return { ...s, phone: vol?.phone, email: vol?.email };
       })
       .sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time));
-  }, [slots, volunteers, windowDays]);
+  }, [slots, volunteers]);
 
   const shiftGroups = useMemo(() => {
     const map = {};
@@ -889,7 +887,18 @@ function RemindersView({ volunteers, slots, showToast, slotsCollectionName, mini
     return Object.values(map).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   }, [upcoming]);
 
-  // Drop selections for shifts that are no longer in view (e.g. window shrank)
+  const dateGroups = useMemo(() => {
+    const map = {};
+    for (const g of shiftGroups) {
+      if (!map[g.date]) map[g.date] = [];
+      map[g.date].push(g);
+    }
+    return Object.entries(map)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, shifts]) => ({ date, shifts }));
+  }, [shiftGroups]);
+
+  // Drop selections for shifts that are no longer in view
   useEffect(() => {
     const validKeys = new Set(shiftGroups.map(g => g.key));
     setSelectedKeys(prev => {
@@ -970,13 +979,7 @@ function RemindersView({ volunteers, slots, showToast, slotsCollectionName, mini
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <Field label="Show shifts in the next">
-        <select style={inputStyle} value={windowDays} onChange={e => setWindowDays(Number(e.target.value))}>
-          {[1,2,3,5,7,14].map(n => <option key={n} value={n}>{n} day{n>1?"s":""}</option>)}
-        </select>
-      </Field>
-
-      {shiftGroups.length === 0 && <Empty text="No assigned shifts in this window." />}
+      {shiftGroups.length === 0 && <Empty text="No upcoming assigned shifts." />}
 
       {shiftGroups.length > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
@@ -1004,67 +1007,79 @@ function RemindersView({ volunteers, slots, showToast, slotsCollectionName, mini
         </div>
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        {shiftGroups.map(g => {
-          const isSelected = selectedKeys.has(g.key);
-          return (
-            <div
-              key={g.key}
-              style={{
-                background: "var(--panel)", border: `1px solid ${isSelected ? "var(--accent)" : "var(--border)"}`,
-                borderRadius: 12, overflow: "hidden",
-              }}
-            >
-              <div
-                onClick={() => toggleShift(g.key)}
-                style={{
-                  display: "flex", alignItems: "center", gap: 12, padding: "12px 14px",
-                  background: isSelected ? "var(--accent-dim)" : "var(--panel-2)",
-                  cursor: "pointer", touchAction: "manipulation", WebkitTapHighlightColor: "transparent", userSelect: "none",
-                }}
-              >
-                <div style={{
-                  width: 22, height: 22, borderRadius: 5, flexShrink: 0,
-                  border: `2px solid ${isSelected ? "var(--accent)" : "var(--border)"}`,
-                  background: isSelected ? "var(--accent)" : "transparent",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}>
-                  {isSelected && <span style={{ color: "#1c1d21", fontSize: 14, fontWeight: 700, lineHeight: 1 }}>✓</span>}
-                </div>
-                <div className="stub-font" style={{ fontSize: 17, color: "var(--accent)", fontWeight: 700 }}>
-                  {fmtDate(g.date)} · {g.time ? fmtTime(g.time) : "All day"}
-                </div>
-                <div style={{ marginLeft: "auto", fontSize: 14, color: "var(--muted)" }}>
-                  {g.items.length} {g.items.length === 1 ? "person" : "people"}
-                </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+        {dateGroups.map(({ date, shifts }) => (
+          <div key={date}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+              <div className="stub-font" style={{ fontSize: 20, color: "var(--text)", fontWeight: 700, whiteSpace: "nowrap" }}>
+                {fmtDate(date)}
               </div>
-
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                {g.items.map(s => {
-                  const status = s.reminderSentAt ? "sent" : emailStatus[s.id];
-                  return (
-                    <div key={s.id} style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", padding: "10px 14px", borderTop: "1px solid var(--border)" }}>
-                      <div style={{ minWidth: 140 }}>
-                        <div style={{ fontWeight: 600, fontSize: 17 }}>{s.volunteerName}</div>
-                        {s.role && <div style={{ fontSize: 14, color: "var(--muted)" }}>{s.role}</div>}
+              <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {shifts.map(g => {
+                const isSelected = selectedKeys.has(g.key);
+                return (
+                  <div
+                    key={g.key}
+                    style={{
+                      background: "var(--panel)", border: `1px solid ${isSelected ? "var(--accent)" : "var(--border)"}`,
+                      borderRadius: 12, overflow: "hidden",
+                    }}
+                  >
+                    <div
+                      onClick={() => toggleShift(g.key)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 12, padding: "12px 14px",
+                        background: isSelected ? "var(--accent-dim)" : "var(--panel-2)",
+                        cursor: "pointer", touchAction: "manipulation", WebkitTapHighlightColor: "transparent", userSelect: "none",
+                      }}
+                    >
+                      <div style={{
+                        width: 22, height: 22, borderRadius: 5, flexShrink: 0,
+                        border: `2px solid ${isSelected ? "var(--accent)" : "var(--border)"}`,
+                        background: isSelected ? "var(--accent)" : "transparent",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>
+                        {isSelected && <span style={{ color: "#1c1d21", fontSize: 14, fontWeight: 700, lineHeight: 1 }}>✓</span>}
                       </div>
-                      <div style={{ fontSize: 14, color: "var(--muted)", flex: 1, minWidth: 100 }}>
-                        {s.phone || <span style={{ color: "var(--bad)" }}>no phone</span>}
-                        {s.email ? ` · ${s.email}` : <span style={{ color: "var(--bad)" }}> · no email</span>}
+                      <div className="stub-font" style={{ fontSize: 17, color: "var(--accent)", fontWeight: 700 }}>
+                        {g.time ? fmtTime(g.time) : "All day"}
                       </div>
-                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                        <Button onClick={() => copyOne(s.phone, "Number")} disabled={!s.phone}>Copy #</Button>
-                        <Button onClick={() => copyOne(buildReminderMessage(s), "Message")}>Copy msg</Button>
-                        {status === "sent" && <span style={{ fontSize: 14, color: "var(--good)" }}>✓ emailed</span>}
-                        {status === "error" && <span style={{ fontSize: 14, color: "var(--bad)" }}>✗ failed</span>}
+                      <div style={{ marginLeft: "auto", fontSize: 14, color: "var(--muted)" }}>
+                        {g.items.length} {g.items.length === 1 ? "person" : "people"}
                       </div>
                     </div>
-                  );
-                })}
-              </div>
+
+                    <div style={{ display: "flex", flexDirection: "column" }}>
+                      {g.items.map(s => {
+                        const status = s.reminderSentAt ? "sent" : emailStatus[s.id];
+                        return (
+                          <div key={s.id} style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", padding: "10px 14px", borderTop: "1px solid var(--border)" }}>
+                            <div style={{ minWidth: 140 }}>
+                              <div style={{ fontWeight: 600, fontSize: 17 }}>{s.volunteerName}</div>
+                              {s.role && <div style={{ fontSize: 14, color: "var(--muted)" }}>{s.role}</div>}
+                            </div>
+                            <div style={{ fontSize: 14, color: "var(--muted)", flex: 1, minWidth: 100 }}>
+                              {s.phone || <span style={{ color: "var(--bad)" }}>no phone</span>}
+                              {s.email ? ` · ${s.email}` : <span style={{ color: "var(--bad)" }}> · no email</span>}
+                            </div>
+                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                              <Button onClick={() => copyOne(s.phone, "Number")} disabled={!s.phone}>Copy #</Button>
+                              <Button onClick={() => copyOne(buildReminderMessage(s), "Message")}>Copy msg</Button>
+                              {status === "sent" && <span style={{ fontSize: 14, color: "var(--good)" }}>✓ emailed</span>}
+                              {status === "error" && <span style={{ fontSize: 14, color: "var(--bad)" }}>✗ failed</span>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
+          </div>
+        ))}
       </div>
     </div>
   );
