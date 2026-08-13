@@ -219,8 +219,9 @@ const inputStyle = {
   borderRadius: 8,
   padding: "9px 10px",
   color: "var(--text)",
-  fontSize: 14,
+  fontSize: 16,
   fontFamily: "inherit",
+  width: "100%",
 };
 
 // ---------- App ----------
@@ -507,7 +508,7 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
 
       <section>
         <SectionTitle>Volunteers</SectionTitle>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 12, padding: 16, marginBottom: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 12, padding: 16, marginBottom: 12 }}>
           <Field label="Name"><input style={inputStyle} value={vName} onChange={e => setVName(e.target.value)} /></Field>
           <Field label="Phone"><input style={inputStyle} value={vPhone} onChange={e => setVPhone(e.target.value)} placeholder="313-555-0100" /></Field>
           <Field label="Email"><input style={inputStyle} value={vEmail} onChange={e => setVEmail(e.target.value)} /></Field>
