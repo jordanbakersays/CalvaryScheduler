@@ -737,6 +737,7 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
                 {volunteers.map(v => (
                   <label
                     key={v.id}
+                    onClick={() => toggleSelectedVol(v.id)}
                     style={{
                       display: "flex", alignItems: "center", gap: 10, fontSize: 16,
                       padding: "10px 6px", borderRadius: 6, cursor: "pointer",
@@ -746,8 +747,9 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
                     <input
                       type="checkbox"
                       checked={sSelectedVolIds.includes(v.id)}
-                      onChange={() => toggleSelectedVol(v.id)}
-                      style={{ width: 20, height: 20, accentColor: "var(--accent)", flexShrink: 0 }}
+                      readOnly
+                      onClick={e => e.preventDefault()}
+                      style={{ width: 20, height: 20, accentColor: "var(--accent)", flexShrink: 0, pointerEvents: "none" }}
                     />
                     {v.name}
                   </label>
