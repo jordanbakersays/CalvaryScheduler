@@ -254,6 +254,63 @@ function addDaysISO(iso, days) {
   dt.setDate(dt.getDate() + days);
   return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
 }
+function toISO(dt) {
+  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+}
+const WEEKDAY_NAMES = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+function ordinal(n) {
+  if (n === "last") return "last";
+  const s = ["th","st","nd","rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+// Given a date, figure out its "position" within its month for recurrence purposes —
+// e.g. Aug 3, 2026 (a Monday) is the 1st Monday of August. If it's the last occurrence
+// of that weekday in its month, prefer "last" so recurrence doesn't skip shorter months.
+function computeNthWeekday(dateISO) {
+  const [y, m, d] = dateISO.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  const weekday = dt.getDay();
+  const nthNum = Math.ceil(d / 7);
+  const next = new Date(y, m - 1, d + 7);
+  const isLast = next.getMonth() !== (m - 1);
+  return { weekday, nth: isLast ? "last" : nthNum };
+}
+// Find the date of the nth (or "last") occurrence of a weekday within a given month.
+// Returns null if that nth occurrence doesn't exist in this particular month.
+function nthWeekdayOfMonth(year, monthIndex, weekday, nth) {
+  if (nth === "last") {
+    const lastOfMonth = new Date(year, monthIndex + 1, 0);
+    let day = lastOfMonth.getDate();
+    while (new Date(year, monthIndex, day).getDay() !== weekday) day--;
+    return new Date(year, monthIndex, day);
+  }
+  const first = new Date(year, monthIndex, 1);
+  const offset = (weekday - first.getDay() + 7) % 7;
+  const day = 1 + offset + (nth - 1) * 7;
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+  if (day > daysInMonth) return null;
+  return new Date(year, monthIndex, day);
+}
+// All matching dates (inclusive) between startISO and untilISO for a given nth-weekday pattern.
+function getRecurrenceDates(startISO, untilISO, weekday, nth) {
+  const [sy, sm] = startISO.split("-").map(Number);
+  let year = sy, month = sm - 1;
+  const dates = [];
+  let guard = 0;
+  while (guard++ < 600) {
+    const monthStartISO = `${year}-${String(month+1).padStart(2,"0")}-01`;
+    if (monthStartISO > untilISO) break;
+    const occ = nthWeekdayOfMonth(year, month, weekday, nth);
+    if (occ) {
+      const occISO = toISO(occ);
+      if (occISO >= startISO && occISO <= untilISO) dates.push(occISO);
+    }
+    month++;
+    if (month > 11) { month = 0; year++; }
+  }
+  return dates;
+}
 function buildReminderMessage(r) {
   const roleText = r.role ? ` (${r.role})` : "";
   const timeText = r.time ? ` at ${fmtTime(r.time)}` : "";
@@ -586,6 +643,11 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
   const [sAllDay, setSAllDay] = useState(false);
   const [sRole, setSRole] = useState("");
   const [sSelectedVolIds, setSSelectedVolIds] = useState([]);
+  const [sRepeat, setSRepeat] = useState(false);
+  const [sRepeatUntil, setSRepeatUntil] = useState("");
+
+  const repeatPattern = useMemo(() => computeNthWeekday(sDate), [sDate]);
+  const repeatLabel = `Repeats on the ${ordinal(repeatPattern.nth)} ${WEEKDAY_NAMES[repeatPattern.weekday]} of every month`;
 
   function toggleSelectedVol(id) {
     setSSelectedVolIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -684,26 +746,52 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
   async function addSlot() {
     const effectiveTime = sAllDay ? "" : sTime;
     if (!sDate || (!sAllDay && !sTime)) return;
-    if (sSelectedVolIds.length === 0) {
-      await addDoc(collection(db, slotsCollectionName), {
-        date: sDate, time: effectiveTime, role: sRole.trim(),
-        volunteerId: null, volunteerName: null,
-        reminderSentAt: null,
-      });
+    if (sRepeat && !sRepeatUntil) {
+      showToast("Pick an end date for the repeat", "bad");
+      return;
+    }
+    if (sRepeat && sRepeatUntil < sDate) {
+      showToast("End date must be after the start date", "bad");
+      return;
+    }
+
+    const dates = sRepeat
+      ? getRecurrenceDates(sDate, sRepeatUntil, repeatPattern.weekday, repeatPattern.nth)
+      : [sDate];
+    const seriesId = sRepeat ? (crypto.randomUUID ? crypto.randomUUID() : `series_${Date.now()}_${Math.random().toString(36).slice(2)}`) : null;
+
+    const jobs = [];
+    for (const date of dates) {
+      if (sSelectedVolIds.length === 0) {
+        jobs.push(addDoc(collection(db, slotsCollectionName), {
+          date, time: effectiveTime, role: sRole.trim(),
+          volunteerId: null, volunteerName: null,
+          reminderSentAt: null, seriesId,
+        }));
+      } else {
+        for (const id of sSelectedVolIds) {
+          const vol = volunteers.find(v => v.id === id);
+          jobs.push(addDoc(collection(db, slotsCollectionName), {
+            date, time: effectiveTime, role: sRole.trim(),
+            volunteerId: vol.id, volunteerName: vol.name,
+            reminderSentAt: null, seriesId,
+          }));
+        }
+      }
+    }
+    await Promise.all(jobs);
+
+    if (sRepeat) {
+      showToast(`Created ${dates.length} occurrence${dates.length > 1 ? "s" : ""}${sSelectedVolIds.length ? ` for ${sSelectedVolIds.length} volunteer${sSelectedVolIds.length > 1 ? "s" : ""}` : ""}`);
+    } else if (sSelectedVolIds.length === 0) {
       showToast("Open shift added");
     } else {
-      await Promise.all(sSelectedVolIds.map(id => {
-        const vol = volunteers.find(v => v.id === id);
-        return addDoc(collection(db, slotsCollectionName), {
-          date: sDate, time: effectiveTime, role: sRole.trim(),
-          volunteerId: vol.id, volunteerName: vol.name,
-          reminderSentAt: null,
-        });
-      }));
       showToast(`Added ${sSelectedVolIds.length} volunteer${sSelectedVolIds.length > 1 ? "s" : ""}`);
     }
     setSRole("");
     setSSelectedVolIds([]);
+    setSRepeat(false);
+    setSRepeatUntil("");
   }
 
   async function removeSlot(id) {
@@ -760,6 +848,31 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
     showToast(`Added ${vol.name}`);
   }
 
+  const [duplicatingKey, setDuplicatingKey] = useState(null);
+  const [duplicateDate, setDuplicateDate] = useState("");
+
+  function startDuplicate(group) {
+    setDuplicatingKey(group.key);
+    setDuplicateDate(addDaysISO(group.date, 7));
+  }
+
+  function cancelDuplicate() {
+    setDuplicatingKey(null);
+  }
+
+  async function confirmDuplicate(group) {
+    if (!duplicateDate) return;
+    const role = roleDrafts[group.key] !== undefined ? roleDrafts[group.key].trim() : (group.items[0]?.role || "");
+    const jobs = group.items.map(it => addDoc(collection(db, slotsCollectionName), {
+      date: duplicateDate, time: group.time, role,
+      volunteerId: it.volunteerId || null, volunteerName: it.volunteerName || null,
+      reminderSentAt: null,
+    }));
+    await Promise.all(jobs);
+    showToast(`Duplicated to ${fmtDate(duplicateDate)}`);
+    setDuplicatingKey(null);
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
       <section>
@@ -792,6 +905,33 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
               />
               All day
             </label>
+          </div>
+          <div>
+            <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 16, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={sRepeat}
+                onChange={e => setSRepeat(e.target.checked)}
+                style={{ width: 20, height: 20, accentColor: "var(--accent)", flexShrink: 0 }}
+              />
+              Repeat monthly
+            </label>
+            {sRepeat && (
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10, paddingLeft: 30 }}>
+                <div style={{ fontSize: 14, color: "var(--accent)" }}>{repeatLabel}</div>
+                <Field label="Until">
+                  <div style={nativePickerWrapStyle}>
+                    <input
+                      style={nativePickerInputStyle}
+                      type="date"
+                      value={sRepeatUntil}
+                      min={sDate}
+                      onChange={e => setSRepeatUntil(e.target.value)}
+                    />
+                  </div>
+                </Field>
+              </div>
+            )}
           </div>
           <div>
             <Field label="Role / notes (optional — applies to everyone added below)">
@@ -832,7 +972,9 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
           </div>
           <div style={{ gridColumn: "1 / -1" }}>
             <Button variant="accent" onClick={addSlot}>
-              {sSelectedVolIds.length > 0
+              {sRepeat
+                ? "Create recurring shift"
+                : sSelectedVolIds.length > 0
                 ? `Add ${sSelectedVolIds.length} volunteer${sSelectedVolIds.length > 1 ? "s" : ""} to this shift`
                 : "Add open shift"}
             </Button>
@@ -856,18 +998,38 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
                 {shifts.map(g => {
                   const roleValue = roleDrafts[g.key] !== undefined ? roleDrafts[g.key] : (g.items[0]?.role || "");
                   const availableToAdd = volunteers.filter(v => !g.items.some(it => it.volunteerId === v.id));
+                  const isDuplicating = duplicatingKey === g.key;
                   return (
                     <div key={g.key} style={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: "var(--panel-2)" }}>
                         <div className="stub-font" style={{ fontSize: 17, color: "var(--accent)", fontWeight: 700 }}>
                           {g.time ? fmtTime(g.time) : "All day"}
                         </div>
-                        <div style={{ marginLeft: "auto", fontSize: 14, color: "var(--muted)" }}>
+                        <div style={{ fontSize: 14, color: "var(--muted)" }}>
                           {g.items.length} {g.items.length === 1 ? "person" : "people"}
                         </div>
+                        <Button onClick={() => startDuplicate(g)} style={{ marginLeft: "auto" }}>Duplicate</Button>
                       </div>
 
                       <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 12 }}>
+                        {isDuplicating && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: 12, background: "var(--panel-2)", border: "1px solid var(--accent)", borderRadius: 8 }}>
+                            <Field label="Duplicate this shift to">
+                              <div style={nativePickerWrapStyle}>
+                                <input
+                                  style={nativePickerInputStyle}
+                                  type="date"
+                                  value={duplicateDate}
+                                  onChange={e => setDuplicateDate(e.target.value)}
+                                />
+                              </div>
+                            </Field>
+                            <div style={{ display: "flex", gap: 8 }}>
+                              <Button variant="accent" onClick={() => confirmDuplicate(g)}>Duplicate</Button>
+                              <Button variant="ghost" onClick={cancelDuplicate}>Cancel</Button>
+                            </div>
+                          </div>
+                        )}
                         <Field label="Role / notes">
                           <input
                             style={inputStyle}
