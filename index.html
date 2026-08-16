@@ -1211,12 +1211,19 @@ function RemindersView({ volunteers, slots, showToast, slotsCollectionName, mini
     [shiftGroups, selectedKeys]
   );
   const withPhones = selectedPeople.filter(s => s.phone);
+  const withEmails = selectedPeople.filter(s => s.email);
   const pendingEmailCount = selectedPeople.filter(s => s.email && !s.reminderSentAt).length;
 
   async function copyAllNumbers() {
     const nums = withPhones.map(s => s.phone).join(", ");
     const ok = await copyToClipboard(nums);
     showToast(ok ? `Copied ${withPhones.length} number(s)` : "Couldn't copy — select manually", ok ? "good" : "bad");
+  }
+
+  async function copyAllEmails() {
+    const emails = withEmails.map(s => s.email).join(", ");
+    const ok = await copyToClipboard(emails);
+    showToast(ok ? `Copied ${withEmails.length} email(s)` : "Couldn't copy — select manually", ok ? "good" : "bad");
   }
 
   async function copyMessages() {
@@ -1293,6 +1300,9 @@ function RemindersView({ volunteers, slots, showToast, slotsCollectionName, mini
         }}>
           <Button onClick={copyAllNumbers} disabled={withPhones.length === 0}>
             Copy {withPhones.length || ""} number{withPhones.length === 1 ? "" : "s"}
+          </Button>
+          <Button onClick={copyAllEmails} disabled={withEmails.length === 0}>
+            Copy {withEmails.length || ""} email{withEmails.length === 1 ? "" : "s"}
           </Button>
           <Button onClick={copyMessages} disabled={selectedKeys.size === 0}>
             Copy message
