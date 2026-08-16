@@ -851,7 +851,14 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
   const [duplicatingKey, setDuplicatingKey] = useState(null);
   const [duplicateDate, setDuplicateDate] = useState("");
 
+  function closeAllPanels() {
+    setDuplicatingKey(null);
+    setEditingKey(null);
+    setDeletingKey(null);
+  }
+
   function startDuplicate(group) {
+    closeAllPanels();
     setDuplicatingKey(group.key);
     setDuplicateDate(addDaysISO(group.date, 7));
   }
@@ -871,6 +878,78 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
     await Promise.all(jobs);
     showToast(`Duplicated to ${fmtDate(duplicateDate)}`);
     setDuplicatingKey(null);
+  }
+
+  // ---- Edit shift (date/time/role), series-aware ----
+  const [editingKey, setEditingKey] = useState(null);
+  const [editDraft, setEditDraft] = useState({ date: "", time: "09:00", allDay: false, role: "" });
+
+  function startEdit(group) {
+    closeAllPanels();
+    setEditingKey(group.key);
+    setEditDraft({
+      date: group.date,
+      time: group.time || "09:00",
+      allDay: !group.time,
+      role: group.items[0]?.role || "",
+    });
+  }
+
+  function cancelEdit() {
+    setEditingKey(null);
+  }
+
+  async function saveEditJustThis(group) {
+    const effectiveTime = editDraft.allDay ? "" : editDraft.time;
+    const hasSeries = group.items.some(it => it.seriesId);
+    await Promise.all(group.items.map(it => updateDoc(doc(db, slotsCollectionName, it.id), {
+      date: editDraft.date, time: effectiveTime, role: editDraft.role.trim(),
+      ...(hasSeries ? { seriesId: null } : {}),
+    })));
+    setEditingKey(null);
+    showToast("Shift updated");
+  }
+
+  async function saveEditThisAndFuture(group) {
+    const effectiveTime = editDraft.allDay ? "" : editDraft.time;
+    const seriesId = group.items.find(it => it.seriesId)?.seriesId;
+    await Promise.all(group.items.map(it => updateDoc(doc(db, slotsCollectionName, it.id), {
+      date: editDraft.date, time: effectiveTime, role: editDraft.role.trim(),
+    })));
+    if (seriesId) {
+      const futureItems = slots.filter(s => s.seriesId === seriesId && s.date > group.date);
+      await Promise.all(futureItems.map(it => updateDoc(doc(db, slotsCollectionName, it.id), {
+        time: effectiveTime, role: editDraft.role.trim(),
+      })));
+    }
+    setEditingKey(null);
+    showToast("Updated this and future shifts");
+  }
+
+  // ---- Delete shift, series-aware ----
+  const [deletingKey, setDeletingKey] = useState(null);
+
+  function startDelete(group) {
+    closeAllPanels();
+    setDeletingKey(group.key);
+  }
+
+  function cancelDelete() {
+    setDeletingKey(null);
+  }
+
+  async function deleteJustThis(group) {
+    await Promise.all(group.items.map(it => deleteDoc(doc(db, slotsCollectionName, it.id))));
+    setDeletingKey(null);
+    showToast("Shift deleted");
+  }
+
+  async function deleteThisAndFuture(group) {
+    const seriesId = group.items.find(it => it.seriesId)?.seriesId;
+    const toDelete = slots.filter(s => s.seriesId === seriesId && s.date >= group.date);
+    await Promise.all(toDelete.map(it => deleteDoc(doc(db, slotsCollectionName, it.id))));
+    setDeletingKey(null);
+    showToast(`Deleted ${toDelete.length} shift${toDelete.length === 1 ? "" : "s"}`);
   }
 
   return (
@@ -999,19 +1078,101 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
                   const roleValue = roleDrafts[g.key] !== undefined ? roleDrafts[g.key] : (g.items[0]?.role || "");
                   const availableToAdd = volunteers.filter(v => !g.items.some(it => it.volunteerId === v.id));
                   const isDuplicating = duplicatingKey === g.key;
+                  const isEditing = editingKey === g.key;
+                  const isDeleting = deletingKey === g.key;
+                  const hasSeries = g.items.some(it => it.seriesId);
                   return (
                     <div key={g.key} style={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: "var(--panel-2)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: "var(--panel-2)", flexWrap: "wrap" }}>
                         <div className="stub-font" style={{ fontSize: 17, color: "var(--accent)", fontWeight: 700 }}>
                           {g.time ? fmtTime(g.time) : "All day"}
                         </div>
                         <div style={{ fontSize: 14, color: "var(--muted)" }}>
                           {g.items.length} {g.items.length === 1 ? "person" : "people"}
+                          {hasSeries && <span title="Part of a recurring series"> · ↻ recurring</span>}
                         </div>
-                        <Button onClick={() => startDuplicate(g)} style={{ marginLeft: "auto" }}>Duplicate</Button>
+                        <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                          <Button onClick={() => startEdit(g)}>Edit</Button>
+                          <Button onClick={() => startDuplicate(g)}>Duplicate</Button>
+                          <Button variant="danger" onClick={() => startDelete(g)}>Delete</Button>
+                        </div>
                       </div>
 
                       <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 12 }}>
+                        {isDeleting && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: 12, background: "var(--panel-2)", border: "1px solid var(--bad)", borderRadius: 8 }}>
+                            <div style={{ fontSize: 15 }}>
+                              {hasSeries
+                                ? "This shift is part of a recurring series. Delete just this occurrence, or this and every future one too?"
+                                : "Delete this shift? This can't be undone."}
+                            </div>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              <Button variant="danger" onClick={() => deleteJustThis(g)}>
+                                {hasSeries ? "Delete just this one" : "Delete"}
+                              </Button>
+                              {hasSeries && (
+                                <Button variant="danger" onClick={() => deleteThisAndFuture(g)}>Delete this + future</Button>
+                              )}
+                              <Button variant="ghost" onClick={cancelDelete}>Cancel</Button>
+                            </div>
+                          </div>
+                        )}
+                        {isEditing && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: 12, background: "var(--panel-2)", border: "1px solid var(--accent)", borderRadius: 8 }}>
+                            <Field label="Date">
+                              <div style={nativePickerWrapStyle}>
+                                <input
+                                  style={nativePickerInputStyle}
+                                  type="date"
+                                  value={editDraft.date}
+                                  onChange={e => setEditDraft(prev => ({ ...prev, date: e.target.value }))}
+                                />
+                              </div>
+                            </Field>
+                            <Field label="Time">
+                              <div style={{ ...nativePickerWrapStyle, opacity: editDraft.allDay ? 0.4 : 1 }}>
+                                <input
+                                  style={nativePickerInputStyle}
+                                  type="time"
+                                  step="900"
+                                  value={editDraft.time}
+                                  disabled={editDraft.allDay}
+                                  onChange={e => setEditDraft(prev => ({ ...prev, time: e.target.value }))}
+                                />
+                              </div>
+                            </Field>
+                            <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 16, cursor: "pointer" }}>
+                              <input
+                                type="checkbox"
+                                checked={editDraft.allDay}
+                                onChange={e => setEditDraft(prev => ({ ...prev, allDay: e.target.checked }))}
+                                style={{ width: 20, height: 20, accentColor: "var(--accent)", flexShrink: 0 }}
+                              />
+                              All day
+                            </label>
+                            <Field label="Role / notes">
+                              <input
+                                style={inputStyle}
+                                value={editDraft.role}
+                                onChange={e => setEditDraft(prev => ({ ...prev, role: e.target.value }))}
+                              />
+                            </Field>
+                            {hasSeries && (
+                              <div style={{ fontSize: 13, color: "var(--muted)" }}>
+                                This is part of a recurring series. "This + future" applies the time/role change to every future occurrence too (each keeps its own date); the date field only ever moves this one occurrence.
+                              </div>
+                            )}
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              <Button variant="accent" onClick={() => saveEditJustThis(g)}>
+                                {hasSeries ? "Save just this one" : "Save"}
+                              </Button>
+                              {hasSeries && (
+                                <Button variant="accent" onClick={() => saveEditThisAndFuture(g)}>Save this + future</Button>
+                              )}
+                              <Button variant="ghost" onClick={cancelEdit}>Cancel</Button>
+                            </div>
+                          </div>
+                        )}
                         {isDuplicating && (
                           <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: 12, background: "var(--panel-2)", border: "1px solid var(--accent)", borderRadius: 8 }}>
                             <Field label="Duplicate this shift to">
@@ -1306,9 +1467,6 @@ function RemindersView({ volunteers, slots, showToast, slotsCollectionName, mini
           </Button>
           <Button onClick={copyMessages} disabled={selectedKeys.size === 0}>
             Copy message
-          </Button>
-          <Button variant="accent" onClick={sendEmails} disabled={sending || pendingEmailCount === 0}>
-            {sending ? "Sending…" : `Send ${pendingEmailCount || ""} email${pendingEmailCount === 1 ? "" : "s"}`}
           </Button>
         </div>
       )}
