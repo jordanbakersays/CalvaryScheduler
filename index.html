@@ -632,9 +632,35 @@ function Empty({ text }) {
 }
 
 // ---------- Manage (admin) ----------
+function ManageNav({ manageSection, setManageSection }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap" }}>
+      {[
+        { id: "shifts", label: "All Shifts" },
+        { id: "add", label: "Add a Shift" },
+        { id: "volunteers", label: "Volunteers" },
+      ].map(t => (
+        <button
+          key={t.id}
+          onClick={() => setManageSection(t.id)}
+          style={{
+            padding: "9px 16px", borderRadius: 20, fontSize: 15, fontWeight: 600,
+            border: `1px solid ${manageSection === t.id ? "var(--accent)" : "var(--border)"}`,
+            background: manageSection === t.id ? "var(--accent-dim)" : "var(--panel-2)",
+            color: manageSection === t.id ? "var(--accent)" : "var(--muted)",
+            cursor: "pointer", touchAction: "manipulation", WebkitTapHighlightColor: "transparent",
+          }}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function ManageView({ volunteers, slots, showToast, volunteersCollectionName, slotsCollectionName }) {
   const { db, collection, addDoc, updateDoc, deleteDoc, doc } = window.__fb;
-  const [manageSection, setManageSection] = useState("shifts"); // "shifts" | "add" | "volunteers"
+  const [manageSection, setManageSection] = useState("add"); // "shifts" | "add" | "volunteers"
   const [vName, setVName] = useState("");
   const [vPhone, setVPhone] = useState("");
   const [vEmail, setVEmail] = useState("");
@@ -985,29 +1011,10 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {[
-          { id: "shifts", label: "All Shifts" },
-          { id: "add", label: "Add a Shift" },
-          { id: "volunteers", label: "Volunteers" },
-        ].map(t => (
-          <button
-            key={t.id}
-            onClick={() => setManageSection(t.id)}
-            style={{
-              padding: "9px 16px", borderRadius: 20, fontSize: 15, fontWeight: 600,
-              border: `1px solid ${manageSection === t.id ? "var(--accent)" : "var(--border)"}`,
-              background: manageSection === t.id ? "var(--accent-dim)" : "var(--panel-2)",
-              color: manageSection === t.id ? "var(--accent)" : "var(--muted)",
-              cursor: "pointer", touchAction: "manipulation", WebkitTapHighlightColor: "transparent",
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <ManageNav manageSection={manageSection} setManageSection={setManageSection} />
 
       {manageSection === "add" && (
+      <>
       <section>
         <SectionTitle>Add a shift</SectionTitle>
         <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 12, padding: 16, width: "100%", boxSizing: "border-box" }}>
@@ -1114,9 +1121,12 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
           </div>
         </div>
       </section>
+      <ManageNav manageSection={manageSection} setManageSection={setManageSection} />
+      </>
       )}
 
       {manageSection === "shifts" && (
+      <>
       <section>
         <SectionTitle>All shifts</SectionTitle>
         {manageDateGroups.length === 0 && <Empty text="No shifts yet." />}
@@ -1287,9 +1297,12 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
           ))}
         </div>
       </section>
+      <ManageNav manageSection={manageSection} setManageSection={setManageSection} />
+      </>
       )}
 
       {manageSection === "volunteers" && (
+      <>
       <section>
         <SectionTitle>Volunteers</SectionTitle>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
@@ -1352,6 +1365,8 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
           ))}
         </div>
       </section>
+      <ManageNav manageSection={manageSection} setManageSection={setManageSection} />
+      </>
       )}
     </div>
   );
