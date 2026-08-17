@@ -634,6 +634,7 @@ function Empty({ text }) {
 // ---------- Manage (admin) ----------
 function ManageView({ volunteers, slots, showToast, volunteersCollectionName, slotsCollectionName }) {
   const { db, collection, addDoc, updateDoc, deleteDoc, doc } = window.__fb;
+  const [manageSection, setManageSection] = useState("shifts"); // "shifts" | "add" | "volunteers"
   const [vName, setVName] = useState("");
   const [vPhone, setVPhone] = useState("");
   const [vEmail, setVEmail] = useState("");
@@ -913,17 +914,47 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
   async function saveEditThisAndFuture(group) {
     const effectiveTime = editDraft.allDay ? "" : editDraft.time;
     const seriesId = group.items.find(it => it.seriesId)?.seriesId;
+    const dateChanged = editDraft.date !== group.date;
+
+    // Update "this" occurrence
     await Promise.all(group.items.map(it => updateDoc(doc(db, slotsCollectionName, it.id), {
       date: editDraft.date, time: effectiveTime, role: editDraft.role.trim(),
     })));
+
     if (seriesId) {
-      const futureItems = slots.filter(s => s.seriesId === seriesId && s.date > group.date);
-      await Promise.all(futureItems.map(it => updateDoc(doc(db, slotsCollectionName, it.id), {
-        time: effectiveTime, role: editDraft.role.trim(),
-      })));
+      const oldFutureItems = slots.filter(s => s.seriesId === seriesId && s.date > group.date);
+
+      if (!dateChanged) {
+        // Same pattern — just propagate time/role, each occurrence keeps its own date
+        await Promise.all(oldFutureItems.map(it => updateDoc(doc(db, slotsCollectionName, it.id), {
+          time: effectiveTime, role: editDraft.role.trim(),
+        })));
+      } else if (oldFutureItems.length > 0) {
+        // Date/pattern changed (e.g. 1st Monday -> 2nd Monday) — regenerate future
+        // occurrences under the new pattern instead of leaving them on the old dates.
+        const latestOldDate = oldFutureItems.reduce((max, it) => it.date > max ? it.date : max, group.date);
+        const newPattern = computeNthWeekday(editDraft.date);
+        const newDates = getRecurrenceDates(editDraft.date, latestOldDate, newPattern.weekday, newPattern.nth)
+          .filter(d => d > editDraft.date);
+
+        await Promise.all(oldFutureItems.map(it => deleteDoc(doc(db, slotsCollectionName, it.id))));
+
+        const templatePeople = group.items.map(it => ({ volunteerId: it.volunteerId || null, volunteerName: it.volunteerName || null }));
+        const jobs = [];
+        for (const d of newDates) {
+          for (const p of templatePeople) {
+            jobs.push(addDoc(collection(db, slotsCollectionName), {
+              date: d, time: effectiveTime, role: editDraft.role.trim(),
+              volunteerId: p.volunteerId, volunteerName: p.volunteerName,
+              reminderSentAt: null, seriesId,
+            }));
+          }
+        }
+        await Promise.all(jobs);
+      }
     }
     setEditingKey(null);
-    showToast("Updated this and future shifts");
+    showToast(dateChanged && seriesId ? "Updated the pattern for this and future shifts" : "Updated this and future shifts");
   }
 
   // ---- Delete shift, series-aware ----
@@ -953,7 +984,30 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {[
+          { id: "shifts", label: "All Shifts" },
+          { id: "add", label: "Add a Shift" },
+          { id: "volunteers", label: "Volunteers" },
+        ].map(t => (
+          <button
+            key={t.id}
+            onClick={() => setManageSection(t.id)}
+            style={{
+              padding: "9px 16px", borderRadius: 20, fontSize: 15, fontWeight: 600,
+              border: `1px solid ${manageSection === t.id ? "var(--accent)" : "var(--border)"}`,
+              background: manageSection === t.id ? "var(--accent-dim)" : "var(--panel-2)",
+              color: manageSection === t.id ? "var(--accent)" : "var(--muted)",
+              cursor: "pointer", touchAction: "manipulation", WebkitTapHighlightColor: "transparent",
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {manageSection === "add" && (
       <section>
         <SectionTitle>Add a shift</SectionTitle>
         <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 12, padding: 16, width: "100%", boxSizing: "border-box" }}>
@@ -1060,7 +1114,9 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
           </div>
         </div>
       </section>
+      )}
 
+      {manageSection === "shifts" && (
       <section>
         <SectionTitle>All shifts</SectionTitle>
         {manageDateGroups.length === 0 && <Empty text="No shifts yet." />}
@@ -1159,7 +1215,7 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
                             </Field>
                             {hasSeries && (
                               <div style={{ fontSize: 13, color: "var(--muted)" }}>
-                                This is part of a recurring series. "This + future" applies the time/role change to every future occurrence too (each keeps its own date); the date field only ever moves this one occurrence.
+                                This is part of a recurring series. "This + future" applies time/role changes to every future occurrence. If you change the date, future occurrences are regenerated to follow the new pattern (e.g. switching this from the 1st Monday to the 2nd Monday will move all future ones to the 2nd Monday too).
                               </div>
                             )}
                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1231,7 +1287,9 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
           ))}
         </div>
       </section>
+      )}
 
+      {manageSection === "volunteers" && (
       <section>
         <SectionTitle>Volunteers</SectionTitle>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
@@ -1263,6 +1321,7 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
             <Button variant="accent" onClick={addVolunteer}>Add volunteer</Button>
           </div>
         </div>
+        <SectionTitle>Volunteer list ({volunteers.length})</SectionTitle>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {volunteers.map(v => (
             <div key={v.id} style={{ padding: "12px 14px", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 10 }}>
@@ -1293,6 +1352,7 @@ function ManageView({ volunteers, slots, showToast, volunteersCollectionName, sl
           ))}
         </div>
       </section>
+      )}
     </div>
   );
 }
