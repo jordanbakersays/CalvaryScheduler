@@ -311,6 +311,66 @@ function getRecurrenceDates(startISO, untilISO, weekday, nth) {
   }
   return dates;
 }
+
+// ---------- .ics calendar file generation ----------
+function icsNowUTC() {
+  const now = new Date();
+  const p = n => String(n).padStart(2, "0");
+  return `${now.getUTCFullYear()}${p(now.getUTCMonth()+1)}${p(now.getUTCDate())}T${p(now.getUTCHours())}${p(now.getUTCMinutes())}${p(now.getUTCSeconds())}Z`;
+}
+function escapeICS(text) {
+  return String(text || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+}
+function icsEventBlock(ev) {
+  let dtstartLine, dtendLine;
+  if (ev.time) {
+    const [h, m] = ev.time.split(":").map(Number);
+    const [y, mo, d] = ev.date.split("-");
+    const startDT = `${y}${mo}${d}T${String(h).padStart(2,"0")}${String(m).padStart(2,"0")}00`;
+    let endH = h + 1;
+    const endDT = `${y}${mo}${d}T${String(endH % 24).padStart(2,"0")}${String(m).padStart(2,"0")}00`;
+    dtstartLine = `DTSTART:${startDT}`;
+    dtendLine = `DTEND:${endDT}`;
+  } else {
+    const dateOnly = ev.date.replace(/-/g, "");
+    const [y, mo, d] = ev.date.split("-").map(Number);
+    const nextDateOnly = toISO(new Date(y, mo - 1, d + 1)).replace(/-/g, "");
+    dtstartLine = `DTSTART;VALUE=DATE:${dateOnly}`;
+    dtendLine = `DTEND;VALUE=DATE:${nextDateOnly}`;
+  }
+  return [
+    "BEGIN:VEVENT",
+    `UID:${ev.uid}`,
+    `DTSTAMP:${icsNowUTC()}`,
+    dtstartLine,
+    dtendLine,
+    `SUMMARY:${escapeICS(ev.summary)}`,
+    ev.description ? `DESCRIPTION:${escapeICS(ev.description)}` : null,
+    "END:VEVENT",
+  ].filter(Boolean).join("\r\n");
+}
+function buildICSFile(events) {
+  return [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//CalvaryScheduler//EN",
+    "CALSCALE:GREGORIAN",
+    ...events.map(icsEventBlock),
+    "END:VCALENDAR",
+  ].join("\r\n");
+}
+function downloadICS(filename, content) {
+  const blob = new Blob([content], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function buildReminderMessage(r) {
   const roleText = r.role ? ` (${r.role})` : "";
   const timeText = r.time ? ` at ${fmtTime(r.time)}` : "";
@@ -484,7 +544,7 @@ function App() {
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <Header tab={tab} setTab={setTab} isAdmin={isAdmin} ministryLabel={ministryLabel} onLogout={logout} />
       <main style={{ flex: 1, maxWidth: 880, margin: "0 auto", width: "100%", padding: "20px 26px 60px", boxSizing: "border-box" }}>
-        {tab === "schedule" && <ScheduleView slots={slots} isAdmin={isAdmin} />}
+        {tab === "schedule" && <ScheduleView slots={slots} isAdmin={isAdmin} ministryLabel={ministryLabel} />}
         {tab === "manage" && (isAdmin
           ? <ManageView volunteers={volunteers} slots={slots} showToast={showToast} volunteersCollectionName={volunteersCollectionName} slotsCollectionName={slotsCollectionName} />
           : <AdminGate onSubmit={tryUnlock} firstRun={passcode === null} />)}
@@ -570,7 +630,7 @@ function AdminGate({ onSubmit, firstRun }) {
 }
 
 // ---------- Schedule (public) ----------
-function ScheduleView({ slots }) {
+function ScheduleView({ slots, ministryLabel }) {
   const grouped = useMemo(() => {
     const byDate = {};
     for (const s of slots) {
@@ -591,6 +651,53 @@ function ScheduleView({ slots }) {
       }));
   }, [slots]);
 
+  const [calendarChoiceKey, setCalendarChoiceKey] = useState(null);
+
+  function cardKey(date, time) { return date + "|" + time; }
+
+  function buildSummary(items) {
+    const names = items.map(s => s.volunteerName).filter(Boolean);
+    const role = items.find(s => s.role)?.role;
+    let summary = ministryLabel ? `${ministryLabel} Volunteer Shift` : "Volunteer Shift";
+    if (role) summary += ` — ${role}`;
+    return summary;
+  }
+  function buildDescription(items) {
+    const names = items.map(s => s.volunteerName).filter(Boolean);
+    return names.length ? `Volunteers: ${names.join(", ")}` : "Open shift";
+  }
+
+  function downloadJustThis(date, time, items) {
+    const ics = buildICSFile([{
+      uid: `${items[0]?.id || `${date}-${time}`}@calvaryscheduler`,
+      date, time, summary: buildSummary(items), description: buildDescription(items),
+    }]);
+    downloadICS(`shift-${date}.ics`, ics);
+    setCalendarChoiceKey(null);
+  }
+
+  function downloadAllFuture(date, time, items) {
+    const seriesId = items.find(it => it.seriesId)?.seriesId;
+    const seriesItemsByDate = {};
+    for (const s of slots) {
+      if (s.seriesId === seriesId && s.date >= date) {
+        const key = s.date + "|" + s.time;
+        if (!seriesItemsByDate[key]) seriesItemsByDate[key] = [];
+        seriesItemsByDate[key].push(s);
+      }
+    }
+    const events = Object.entries(seriesItemsByDate).map(([key, its]) => {
+      const [d, t] = key.split("|");
+      return {
+        uid: `${its[0]?.id || key}@calvaryscheduler`,
+        date: d, time: t, summary: buildSummary(its), description: buildDescription(its),
+      };
+    });
+    const ics = buildICSFile(events);
+    downloadICS(`shifts-${date}-and-future.ics`, ics);
+    setCalendarChoiceKey(null);
+  }
+
   if (grouped.length === 0) {
     return <Empty text="No shifts scheduled yet." />;
   }
@@ -603,9 +710,33 @@ function ScheduleView({ slots }) {
           <div style={{ flex: 1 }}>
             <div className="stub-font" style={{ fontSize: 30, color: "var(--text)", fontWeight: 700, marginBottom: 12 }}>{fmtDate(date)}</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-              {times.map(([time, items]) => (
+              {times.map(([time, items]) => {
+                const key = cardKey(date, time);
+                const hasSeries = items.some(it => it.seriesId);
+                const isChoosing = calendarChoiceKey === key;
+                return (
                 <div key={time} className="ticket">
-                  <div className="ticket-hero-time">{time ? fmtTime(time) : "All Day"}</div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <div className="ticket-hero-time">{time ? fmtTime(time) : "All Day"}</div>
+                    <button
+                      onClick={() => hasSeries ? setCalendarChoiceKey(isChoosing ? null : key) : downloadJustThis(date, time, items)}
+                      style={{
+                        background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 20,
+                        padding: "6px 12px", fontSize: 13, color: "var(--muted)", fontWeight: 600,
+                        cursor: "pointer", touchAction: "manipulation", WebkitTapHighlightColor: "transparent",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      📅 Add to calendar
+                    </button>
+                  </div>
+                  {isChoosing && (
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "10px 0" }}>
+                      <Button onClick={() => downloadJustThis(date, time, items)}>Just this shift</Button>
+                      <Button onClick={() => downloadAllFuture(date, time, items)}>All future instances</Button>
+                      <Button variant="ghost" onClick={() => setCalendarChoiceKey(null)}>Cancel</Button>
+                    </div>
+                  )}
                   <div className="ticket-divider" />
                   <div className="ticket-names">
                     {items.map(s => (
@@ -618,7 +749,8 @@ function ScheduleView({ slots }) {
                     ))}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
